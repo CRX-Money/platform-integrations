@@ -59,7 +59,11 @@ releases as described in [releasing.md](releasing.md).
 - **Actions → General:** allow GitHub-created and verified-creator actions only;
   workflow permissions **Read repository contents**; do not allow Actions to
   approve pull requests.
-- **Secrets → Actions:** `NUGET_API_KEY` (see [releasing.md](releasing.md)).
+- **Secrets → Actions:** none. Publishing uses nuget.org Trusted Publishing
+  (GitHub OIDC), so no NuGet API key is stored here. The matching policy lives on
+  nuget.org: package owner `crx-money`, repository owner `CRX-Money`, repository
+  `platform-integrations`, workflow file `publish.yml`, no environment (see
+  [releasing.md](releasing.md)).
 - **General → Pull requests:** allow squash merging; automatically delete head
   branches.
 - **Code security:** enable Dependabot alerts, Dependabot security updates,
