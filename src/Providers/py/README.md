@@ -4,8 +4,8 @@ Plugins for banks and financial institutions licensed by the Banco Central del
 Paraguay. One folder per provider:
 
 ```
-src/Providers/py/<Provider>/CrxMoney.Integrations.Py.<Provider>.csproj
-tests/Providers/py/<Provider>/CrxMoney.Integrations.Py.<Provider>.Tests/
+src/Providers/py/<Provider>/CrxMoney.Integrations.Providers.Py.<Provider>.csproj
+tests/Providers/py/<Provider>/CrxMoney.Integrations.Providers.Py.<Provider>.Tests/
 ```
 
 No provider yet. Paraguayan identifiers (RUC, cédula, account numbers) are real

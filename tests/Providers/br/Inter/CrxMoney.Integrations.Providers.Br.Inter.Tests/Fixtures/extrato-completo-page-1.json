@@ -1,0 +1,72 @@
+{
+  "totalPaginas": 2,
+  "totalElementos": 9,
+  "ultimaPagina": true,
+  "primeiraPagina": false,
+  "tamanhoPagina": 5,
+  "numeroDeElementos": 4,
+  "transacoes": [
+    {
+      "cpmf": "0.00",
+      "idTransacao": "SYNTH-TX-0006",
+      "dataInclusao": "2026-03-15 10:00:00",
+      "dataTransacao": "2026-03-15",
+      "tipoTransacao": "INVESTIMENTO",
+      "tipoOperacao": "D",
+      "valor": "5000.00",
+      "titulo": "Aplicacao",
+      "descricao": "APLICACAO CDB LIQUIDEZ DIARIA",
+      "detalhes": {
+        "tipoDetalhe": "INVESTIMENTO",
+        "produto": "CDB Liquidez Diaria"
+      }
+    },
+    {
+      "cpmf": "0.00",
+      "idTransacao": "SYNTH-TX-0007",
+      "dataInclusao": "2026-03-18 13:10:00",
+      "dataTransacao": "2026-03-18",
+      "tipoTransacao": "CAMBIO",
+      "tipoOperacao": "C",
+      "valor": "5123.40",
+      "titulo": "Cambio recebido",
+      "descricao": "CAMBIO - Example Corp",
+      "detalhes": {
+        "tipoDetalhe": "CAMBIO",
+        "moedaOrigem": "USD",
+        "valorMoedaOrigem": "1000.00",
+        "taxaCambio": "5.1234",
+        "nomeRemetente": "Example Corp"
+      }
+    },
+    {
+      "cpmf": "0.00",
+      "idTransacao": "SYNTH-TX-0008",
+      "dataInclusao": "2026-03-20 09:45:00",
+      "dataTransacao": "2026-03-20",
+      "tipoTransacao": "ESTORNO",
+      "tipoOperacao": "C",
+      "valor": "250.75",
+      "titulo": "Estorno",
+      "descricao": "ESTORNO PIX - devolvido pelo recebedor",
+      "detalhes": {
+        "tipoDetalhe": "ESTORNO",
+        "idTransacaoOriginal": "SYNTH-TX-0002",
+        "motivo": "Devolucao solicitada",
+        "cpfCnpjPagador": "***.456.789-**"
+      }
+    },
+    {
+      "cpmf": "0.00",
+      "idTransacao": "SYNTH-TX-0009",
+      "dataInclusao": "2026-03-31 23:59:00",
+      "dataTransacao": "2026-03-31",
+      "tipoTransacao": "OUTROS",
+      "tipoOperacao": "D",
+      "valor": "12.90",
+      "titulo": "Tarifa",
+      "descricao": "TARIFA MANUTENCAO",
+      "detalhes": null
+    }
+  ]
+}
