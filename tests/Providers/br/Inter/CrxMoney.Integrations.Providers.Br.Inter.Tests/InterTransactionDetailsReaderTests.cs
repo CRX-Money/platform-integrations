@@ -24,6 +24,27 @@ public sealed class InterTransactionDetailsReaderTests
     }
 
     [Fact]
+    public void Documented_pix_sample_keys_are_recognised_for_both_directions()
+    {
+        // Key names from the portal's response sample for GET /banking/v2/extrato/completo; values are synthetic.
+        const string sample = """
+            {"txId":"SYNTHTXID","nomePagador":"Pagador Exemplo","descricaoPix":"Aluguel","cpfCnpjPagador":"{{CPF:5}}",
+             "contaBancariaRecebedor":"23456789","nomeEmpresaPagador":"Banco Pagador Exemplo","tipoDetalhe":"COMPLETE",
+             "endToEndId":"E00000000202206201436SYNTH","chavePixRecebedor":"+5510912345678","nomeEmpresaRecebedor":"Banco Recebedor Exemplo",
+             "nomeRecebedor":"Recebedor Exemplo","agenciaRecebedor":"0089","cpfCnpjRecebedor":"{{CPF:6}}","origemMovimentacao":"CHAVE",
+             "codigoSolicitacao":"00000000-0000-4000-8000-000000000099"}
+            """;
+
+        var (credit, creditPix) = InterTransactionDetailsReader.Read(Details(sample), isCredit: true);
+        var (debit, debitPix) = InterTransactionDetailsReader.Read(Details(sample), isCredit: false);
+
+        Assert.Equal(new InterCounterparty("Pagador Exemplo", new BrazilianTaxId(SyntheticTaxIds.Cpf(5), BrazilianTaxId.Cpf), "Banco Pagador Exemplo", null, null), credit);
+        Assert.Equal(new InterPixIdentifiers("E00000000202206201436SYNTH", "SYNTHTXID", null), creditPix);
+        Assert.Equal(new InterCounterparty("Recebedor Exemplo", new BrazilianTaxId(SyntheticTaxIds.Cpf(6), BrazilianTaxId.Cpf), "Banco Recebedor Exemplo", "0089", "23456789"), debit);
+        Assert.Equal("+5510912345678", debitPix.Key);
+    }
+
+    [Fact]
     public void Debit_takes_the_payee_from_a_nested_object()
     {
         var details = Details("""

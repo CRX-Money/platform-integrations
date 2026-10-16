@@ -17,15 +17,21 @@
       "titulo": "Pix recebido",
       "descricao": "PIX RECEBIDO - Cliente Exemplo Ltda",
       "detalhes": {
-        "tipoDetalhe": "PIX",
-        "endToEndId": "E00000000202603020915SYNTH000001",
         "txId": "SYNTHTXID000001",
         "nomePagador": "Cliente Exemplo Ltda",
+        "descricaoPix": "Fatura 0001",
         "cpfCnpjPagador": "{{CNPJ:1}}",
-        "nomeRecebedor": "Empresa Exemplo Ltda",
-        "cpfCnpjRecebedor": "{{CNPJ:9}}",
+        "contaBancariaRecebedor": "12345678",
+        "nomeEmpresaPagador": "Banco Exemplo Pagador S.A.",
+        "tipoDetalhe": "COMPLETE",
+        "endToEndId": "E00000000202603020915SYNTH000001",
         "chavePixRecebedor": "financeiro@empresa.example",
-        "descricaoPix": "Fatura 0001"
+        "nomeEmpresaRecebedor": "Banco Exemplo Recebedor S.A.",
+        "nomeRecebedor": "Empresa Exemplo Ltda",
+        "agenciaRecebedor": "0001",
+        "cpfCnpjRecebedor": "{{CNPJ:9}}",
+        "origemMovimentacao": "CHAVE",
+        "codigoSolicitacao": "00000000-0000-4000-8000-000000000011"
       }
     },
     {
@@ -39,20 +45,21 @@
       "titulo": "Pix enviado",
       "descricao": "PIX ENVIADO - Fulano de Tal",
       "detalhes": {
-        "tipoDetalhe": "PIX",
+        "txId": "SYNTHTXID000002",
+        "nomePagador": "Empresa Exemplo Ltda",
+        "descricaoPix": "Reembolso",
+        "cpfCnpjPagador": "{{CNPJ:9}}",
+        "contaBancariaRecebedor": "23456789",
+        "nomeEmpresaPagador": "Banco Exemplo Pagador S.A.",
+        "tipoDetalhe": "COMPLETE",
         "endToEndId": "E00000000202603031140SYNTH000002",
-        "pagador": {
-          "nome": "Empresa Exemplo Ltda",
-          "cpfCnpj": "{{CNPJ:9}}"
-        },
-        "recebedor": {
-          "nome": "Fulano de Tal",
-          "cpfCnpj": "{{CPF:1}}",
-          "banco": "Banco Exemplo S.A.",
-          "agencia": "0001",
-          "conta": "12345678-9"
-        },
-        "chavePixRecebedor": "00000000-0000-4000-8000-000000000001"
+        "chavePixRecebedor": "00000000-0000-4000-8000-000000000001",
+        "nomeEmpresaRecebedor": "Banco Exemplo Recebedor S.A.",
+        "nomeRecebedor": "Fulano de Tal",
+        "agenciaRecebedor": "0089",
+        "cpfCnpjRecebedor": "{{CPF:1}}",
+        "origemMovimentacao": "CHAVE",
+        "codigoSolicitacao": "00000000-0000-4000-8000-000000000012"
       }
     },
     {

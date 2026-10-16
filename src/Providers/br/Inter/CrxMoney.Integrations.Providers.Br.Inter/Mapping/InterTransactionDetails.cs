@@ -138,8 +138,12 @@ internal static class InterTransactionDetailsReader
             return FieldKind.PixKey;
         if (key.Contains("cpf", StringComparison.Ordinal) || key.Contains("cnpj", StringComparison.Ordinal))
             return FieldKind.TaxId;
-        // Bank before name: "nomeBanco" / "nomeInstituicao" name the bank, not the counterparty.
-        if (key.Contains("banco", StringComparison.Ordinal) || key.Contains("instituicao", StringComparison.Ordinal) || key.Contains("ispb", StringComparison.Ordinal))
+        // Bank before name: "nomeBanco", "nomeInstituicao" and, in Inter's documented Pix sample,
+        // "nomeEmpresaPagador"/"nomeEmpresaRecebedor" ("Banco Inter", "CAIXA ...") name the bank, not the person.
+        if (key.Contains("banco", StringComparison.Ordinal)
+            || key.Contains("instituicao", StringComparison.Ordinal)
+            || key.Contains("ispb", StringComparison.Ordinal)
+            || key.Contains("nomeempresa", StringComparison.Ordinal))
             return FieldKind.Bank;
         if (key.Contains("nome", StringComparison.Ordinal) || key.Contains("razaosocial", StringComparison.Ordinal))
             return FieldKind.Name;

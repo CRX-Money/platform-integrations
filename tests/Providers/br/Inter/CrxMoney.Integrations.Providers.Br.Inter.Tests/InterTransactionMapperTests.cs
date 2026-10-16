@@ -76,9 +76,26 @@ public sealed class InterTransactionMapperTests
         Assert.Equal(SyntheticTaxIds.Cnpj(1), data["counterparty"]!["taxId"]!.GetValue<string>());
         Assert.Equal("CNPJ", data["counterparty"]!["taxIdKind"]!.GetValue<string>());
         Assert.Equal("BR", data["counterparty"]!["taxIdCountry"]!.GetValue<string>());
+        Assert.Equal("Banco Exemplo Pagador S.A.", data["counterparty"]!["bank"]!.GetValue<string>());
         Assert.Equal("E00000000202603020915SYNTH000001", data["pix"]!["endToEndId"]!.GetValue<string>());
         Assert.Equal("SYNTHTXID000001", data["pix"]!["txId"]!.GetValue<string>());
         Assert.Null(data["transferHint"]);
+    }
+
+    [Fact]
+    public void Pix_debit_in_the_documented_shape_takes_the_payee()
+    {
+        var data = Data(Map("SYNTH-TX-0002"));
+        var counterparty = data["counterparty"]!;
+
+        Assert.Equal("Fulano de Tal", counterparty["name"]!.GetValue<string>());
+        Assert.Equal(SyntheticTaxIds.Cpf(1), counterparty["taxId"]!.GetValue<string>());
+        Assert.Equal("CPF", counterparty["taxIdKind"]!.GetValue<string>());
+        Assert.Equal("Banco Exemplo Recebedor S.A.", counterparty["bank"]!.GetValue<string>());
+        Assert.Equal("0089", counterparty["branch"]!.GetValue<string>());
+        Assert.Equal("23456789", counterparty["account"]!.GetValue<string>());
+        Assert.Equal("00000000-0000-4000-8000-000000000001", data["pix"]!["key"]!.GetValue<string>());
+        Assert.Equal("SYNTHTXID000002", data["pix"]!["txId"]!.GetValue<string>());
     }
 
     [Fact]

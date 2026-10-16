@@ -40,9 +40,14 @@ and the whole `detalhes` object verbatim, and adds:
 
 ### How the counterparty is found
 
-Inter's reference and its SDKs leave `detalhes` untyped, and its keys vary with
-`tipoTransacao`. The plugin therefore recognises fields by the words in their key
-path instead of by a fixed list: `nome…` is a name (`nomeBanco…` is the bank), `cpf…`/`cnpj…` a tax id,
+Inter's reference documents `detalhes` only through one Pix response sample
+(`nomePagador`, `cpfCnpjPagador`, `nomeEmpresaPagador`, `nomeRecebedor`,
+`cpfCnpjRecebedor`, `nomeEmpresaRecebedor`, `agenciaRecebedor`,
+`contaBancariaRecebedor`, `chavePixRecebedor`, `endToEndId`, `txId`, `descricaoPix`,
+`origemMovimentacao`, `codigoSolicitacao`, `tipoDetalhe`); its SDKs leave the
+object untyped, and the boleto, TED and investment shapes are undocumented. The plugin therefore recognises fields by the words in their key
+path instead of by a fixed list: `nome…` is a name (`nomeBanco…` and
+`nomeEmpresa…`, which carries the institution such as "Banco Inter", are the bank), `cpf…`/`cnpj…` a tax id,
 `agencia…`, `conta…`, `banco…`, `endToEnd…`, `txId`, `chave…`; `pagador`,
 `remetente`, `origem` mark the payer and `recebedor`, `beneficiario`,
 `favorecido`, `destinatario`, `destino` the payee (also as parent objects, such as
