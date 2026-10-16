@@ -1,0 +1,175 @@
+namespace CrxMoney.Integrations.Abstractions.Models
+{
+    public sealed class BalanceSnapshot : System.IEquatable<CrxMoney.Integrations.Abstractions.Models.BalanceSnapshot>
+    {
+        public BalanceSnapshot(string AssetSymbol, decimal Total, decimal Available, decimal Locked, System.DateTimeOffset AsOfUtc) { }
+        public System.DateTimeOffset AsOfUtc { get; init; }
+        public string AssetSymbol { get; init; }
+        public decimal Available { get; init; }
+        public decimal Locked { get; init; }
+        public decimal Total { get; init; }
+    }
+    public sealed class TradeFill : System.IEquatable<CrxMoney.Integrations.Abstractions.Models.TradeFill>
+    {
+        public TradeFill(string ExternalTradeId, string Symbol, System.DateTimeOffset ExecutedAtUtc, decimal Quantity, decimal Price, decimal FeeAmount, string FeeAsset, bool IsBuy) { }
+        public System.DateTimeOffset ExecutedAtUtc { get; init; }
+        public string ExternalTradeId { get; init; }
+        public decimal FeeAmount { get; init; }
+        public string FeeAsset { get; init; }
+        public bool IsBuy { get; init; }
+        public decimal Price { get; init; }
+        public decimal Quantity { get; init; }
+        public string Symbol { get; init; }
+    }
+    public enum TransferKind
+    {
+        Deposit = 0,
+        Withdrawal = 1,
+    }
+    public sealed class TransferRecord : System.IEquatable<CrxMoney.Integrations.Abstractions.Models.TransferRecord>
+    {
+        public TransferRecord(string ExternalTransferId, CrxMoney.Integrations.Abstractions.Models.TransferKind Kind, string AssetSymbol, decimal Amount, System.DateTimeOffset OccurredAtUtc, string? Network = null, decimal? FeeAmount = default, string? TransactionHash = null) { }
+        public decimal Amount { get; init; }
+        public string AssetSymbol { get; init; }
+        public string ExternalTransferId { get; init; }
+        public decimal? FeeAmount { get; init; }
+        public CrxMoney.Integrations.Abstractions.Models.TransferKind Kind { get; init; }
+        public string? Network { get; init; }
+        public System.DateTimeOffset OccurredAtUtc { get; init; }
+        public string? TransactionHash { get; init; }
+    }
+}
+namespace CrxMoney.Integrations.Abstractions.Plugins
+{
+    public interface IIntegrationImportSchemaManifestProvider
+    {
+        CrxMoney.Integrations.Abstractions.Plugins.IntegrationImportSchemaManifest GetImportSchemaManifest();
+    }
+    public interface IIntegrationPlugin
+    {
+        CrxMoney.Integrations.Abstractions.Plugins.IntegrationCapability Capabilities { get; }
+        CrxMoney.Integrations.Abstractions.Plugins.IntegrationPluginDefaults Defaults { get; }
+        string DisplayName { get; }
+        string ProviderId { get; }
+        System.Threading.Tasks.Task<CrxMoney.Integrations.Abstractions.Sync.IntegrationSyncResult> SyncAsync(CrxMoney.Integrations.Abstractions.Sync.IntegrationSyncRequest request, System.Threading.CancellationToken cancellationToken = default);
+    }
+    [System.Flags]
+    public enum IntegrationCapability
+    {
+        None = 0,
+        Balances = 1,
+        Trades = 2,
+        Transfers = 4,
+        Prices = 8,
+    }
+    public sealed class IntegrationImportSchemaManifest : System.IEquatable<CrxMoney.Integrations.Abstractions.Plugins.IntegrationImportSchemaManifest>
+    {
+        public static readonly CrxMoney.Integrations.Abstractions.Plugins.IntegrationImportSchemaManifest Empty;
+        public IntegrationImportSchemaManifest(System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Plugins.IntegrationImportSchemaManifestItem> Schemas) { }
+        public System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Plugins.IntegrationImportSchemaManifestItem> Schemas { get; init; }
+    }
+    public sealed class IntegrationImportSchemaManifestItem : System.IEquatable<CrxMoney.Integrations.Abstractions.Plugins.IntegrationImportSchemaManifestItem>
+    {
+        public IntegrationImportSchemaManifestItem(string SchemaId, short Version, string Name, string? Description = null, string? JsonSchema = null, string? SchemaHash = null, bool IsActive = true) { }
+        public string? Description { get; init; }
+        public bool IsActive { get; init; }
+        public string? JsonSchema { get; init; }
+        public string Name { get; init; }
+        public string? SchemaHash { get; init; }
+        public string SchemaId { get; init; }
+        public short Version { get; init; }
+    }
+    public readonly struct IntegrationPluginDefaults : System.IEquatable<CrxMoney.Integrations.Abstractions.Plugins.IntegrationPluginDefaults>
+    {
+        public IntegrationPluginDefaults(short SyncEveryMinutes, System.DateOnly? SuggestedBackfillFromDate) { }
+        public System.DateOnly? SuggestedBackfillFromDate { get; init; }
+        public short SyncEveryMinutes { get; init; }
+        public static CrxMoney.Integrations.Abstractions.Plugins.IntegrationPluginDefaults Default { get; }
+    }
+}
+namespace CrxMoney.Integrations.Abstractions.Secrets
+{
+    public interface IIntegrationSecretResolver
+    {
+        string? Resolve(string locator);
+        System.Threading.Tasks.Task<string?> ResolveAsync(string locator, System.Guid tenantUuid, System.Threading.CancellationToken cancellationToken = default);
+    }
+}
+namespace CrxMoney.Integrations.Abstractions.Sync
+{
+    public sealed class IntegrationCheckpoint : System.IEquatable<CrxMoney.Integrations.Abstractions.Sync.IntegrationCheckpoint>
+    {
+        public IntegrationCheckpoint(string Resource, string CursorValue) { }
+        public string CursorValue { get; init; }
+        public string Resource { get; init; }
+    }
+    public enum IntegrationErrorKind
+    {
+        None = 0,
+        Authentication = 1,
+        Configuration = 2,
+        Permission = 3,
+        RateLimited = 4,
+        Network = 5,
+        Upstream = 6,
+        Validation = 7,
+        Unknown = 8,
+    }
+    public sealed class IntegrationImportEvent : System.IEquatable<CrxMoney.Integrations.Abstractions.Sync.IntegrationImportEvent>
+    {
+        public IntegrationImportEvent(string ExternalId, string IdempotencyKey, string Type, string Side, System.DateTimeOffset OccurredAtUtc, string ExternalAccountId, string? AssetCode, decimal? Quantity, decimal? Amount, decimal? FeeAmount, string? FeeAssetCode, string? ProviderData, string? ProviderDataSchemaId = null, short? ProviderDataSchemaVersion = default) { }
+        public decimal? Amount { get; init; }
+        public string? AssetCode { get; init; }
+        public string ExternalAccountId { get; init; }
+        public string ExternalId { get; init; }
+        public decimal? FeeAmount { get; init; }
+        public string? FeeAssetCode { get; init; }
+        public string IdempotencyKey { get; init; }
+        public System.DateTimeOffset OccurredAtUtc { get; init; }
+        public string? ProviderData { get; init; }
+        public string? ProviderDataSchemaId { get; init; }
+        public short? ProviderDataSchemaVersion { get; init; }
+        public decimal? Quantity { get; init; }
+        public string Side { get; init; }
+        public string Type { get; init; }
+    }
+    public sealed class IntegrationSyncRequest : System.IEquatable<CrxMoney.Integrations.Abstractions.Sync.IntegrationSyncRequest>
+    {
+        public IntegrationSyncRequest(long ConnectionId, string ProviderId, System.DateTimeOffset? WindowStartUtc, System.DateTimeOffset? WindowEndUtc, string? CorrelationId = null, string? PreviousCheckpoint = null, System.Collections.Generic.IReadOnlyList<string>? TenantTrackedAssetCodes = null, string? ApiKey = null, string? ApiSecret = null, string? Passphrase = null, System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Sync.IntegrationCheckpoint>? PreviousCheckpoints = null) { }
+        public string? ApiKey { get; init; }
+        public string? ApiSecret { get; init; }
+        public long ConnectionId { get; init; }
+        public string? CorrelationId { get; init; }
+        public string? Passphrase { get; init; }
+        public string? PreviousCheckpoint { get; init; }
+        public System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Sync.IntegrationCheckpoint>? PreviousCheckpoints { get; init; }
+        public string ProviderId { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string>? TenantTrackedAssetCodes { get; init; }
+        public System.DateTimeOffset? WindowEndUtc { get; init; }
+        public System.DateTimeOffset? WindowStartUtc { get; init; }
+    }
+    public sealed class IntegrationSyncResult : System.IEquatable<CrxMoney.Integrations.Abstractions.Sync.IntegrationSyncResult>
+    {
+        public IntegrationSyncResult(CrxMoney.Integrations.Abstractions.Sync.IntegrationSyncStatus Status, System.DateTimeOffset StartedAtUtc, System.DateTimeOffset CompletedAtUtc, int BalancesImported, int TradesImported, int TransfersImported, System.Collections.Generic.IReadOnlyList<string> NonZeroAssetCodes, System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Sync.IntegrationCheckpoint> Checkpoints, System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Sync.IntegrationImportEvent> ImportEvents, CrxMoney.Integrations.Abstractions.Sync.IntegrationErrorKind ErrorKind = 0, string? ErrorMessage = null, string? ProviderDiagnosticsJson = null) { }
+        public int BalancesImported { get; init; }
+        public System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Sync.IntegrationCheckpoint> Checkpoints { get; init; }
+        public System.DateTimeOffset CompletedAtUtc { get; init; }
+        public CrxMoney.Integrations.Abstractions.Sync.IntegrationErrorKind ErrorKind { get; init; }
+        public string? ErrorMessage { get; init; }
+        public System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Sync.IntegrationImportEvent> ImportEvents { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> NonZeroAssetCodes { get; init; }
+        public string? ProviderDiagnosticsJson { get; init; }
+        public System.DateTimeOffset StartedAtUtc { get; init; }
+        public CrxMoney.Integrations.Abstractions.Sync.IntegrationSyncStatus Status { get; init; }
+        public int TradesImported { get; init; }
+        public int TransfersImported { get; init; }
+        public static CrxMoney.Integrations.Abstractions.Sync.IntegrationSyncResult Failure(System.DateTimeOffset startedAtUtc, System.DateTimeOffset completedAtUtc, CrxMoney.Integrations.Abstractions.Sync.IntegrationErrorKind errorKind, string? errorMessage = null, string? providerDiagnosticsJson = null) { }
+        public static CrxMoney.Integrations.Abstractions.Sync.IntegrationSyncResult Success(System.DateTimeOffset startedAtUtc, System.DateTimeOffset completedAtUtc, int balancesImported, int tradesImported, int transfersImported, System.Collections.Generic.IReadOnlyList<string>? nonZeroAssetCodes = null, System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Sync.IntegrationCheckpoint>? checkpoints = null, System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Sync.IntegrationImportEvent>? importEvents = null, string? providerDiagnosticsJson = null) { }
+    }
+    public enum IntegrationSyncStatus
+    {
+        Succeeded = 0,
+        PartiallySucceeded = 1,
+        Failed = 2,
+    }
+}

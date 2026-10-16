@@ -1,0 +1,4 @@
+<Project>
+  <!-- Shared MSBuild settings live under build/. -->
+  <Import Project="$(MSBuildThisFileDirectory)build/Common.props" />
+</Project>

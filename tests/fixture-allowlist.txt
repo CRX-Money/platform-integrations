@@ -1,0 +1,3 @@
+# Fixture guard allowlist: values confirmed as synthetic although they trip a rule.
+# One value per line, then "# reason" (required). Punctuation is ignored for numbers.
+# Code owners review every change to this file. See docs/fixture-policy.md.

@@ -1,0 +1,11 @@
+# Normalise text to LF in the repository; check out with the platform's native endings.
+* text=auto
+
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Statement fixtures are compared byte for byte; never rewrite their line endings.
+*.ofx -text
+*.qfx -text
+*.pdf binary
