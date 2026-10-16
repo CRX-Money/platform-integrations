@@ -20,13 +20,12 @@ env:
   SOLUTION: CrxMoney.Integrations.slnx
 
 jobs:
-  publish:
-    name: publish
+  # Builds, tests and packs with read-only permissions. Restore, build and test run third-party and
+  # contributor code, so this job must never hold id-token: write.
+  build:
+    name: build
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    permissions:
-      contents: read
-      id-token: write # GitHub OIDC token for nuget.org Trusted Publishing; no stored API key.
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -76,16 +75,35 @@ jobs:
         with:
           name: packages
           path: artifacts/packages/
+          if-no-files-found: error
+
+  # Pushes the packages built above. The only job allowed to request a GitHub OIDC token, so it runs no
+  # repository code: no checkout, no restore, actions pinned to commit SHAs. If it fails (for example a
+  # Trusted Publishing policy mismatch), "Re-run failed jobs" retries only this job against the same packages.
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write # GitHub OIDC token for nuget.org Trusted Publishing; no stored API key.
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: artifacts/packages
 
       # Exchanges the OIDC token for a nuget.org API key valid for one hour, so it runs right before the push.
       # `user` is the nuget.org account that CREATED the Trusted Publishing policy (nuget.org looks policies up
       # by creator), not the crx-money organisation that owns the packages. See docs/releasing.md.
       - name: Log in to nuget.org (Trusted Publishing)
         id: nuget-login
-        uses: NuGet/login@v1
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         with:
           user: crx-lc
 
+      # Uses the runner's preinstalled .NET SDK; any SDK can push.
       - name: Push to nuget.org
         env:
           NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
