@@ -2,7 +2,14 @@
   <Folder Name="/build/">
     <Project Path="build/FixtureGuard/CrxMoney.Integrations.FixtureGuard.csproj" />
   </Folder>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Abstractions/">
+    <Project Path="src/Abstractions/CrxMoney.Integrations.Abstractions/CrxMoney.Integrations.Abstractions.csproj" />
+  </Folder>
   <Folder Name="/tests/" />
+  <Folder Name="/tests/Abstractions/">
+    <Project Path="tests/Abstractions/CrxMoney.Integrations.Abstractions.Tests/CrxMoney.Integrations.Abstractions.Tests.csproj" />
+  </Folder>
   <Folder Name="/tests/Build/">
     <Project Path="tests/Build/CrxMoney.Integrations.FixtureGuard.Tests/CrxMoney.Integrations.FixtureGuard.Tests.csproj" />
   </Folder>

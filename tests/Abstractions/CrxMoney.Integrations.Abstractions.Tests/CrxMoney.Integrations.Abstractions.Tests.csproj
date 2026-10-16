@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="PublicApiGenerator" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Abstractions\CrxMoney.Integrations.Abstractions\CrxMoney.Integrations.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

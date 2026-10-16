@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>CrxMoney.Integrations.Abstractions</PackageId>
+    <Description>Plugin contract for CRX•Money Platform integrations: the interfaces and records a bank, exchange or file-format provider implements so the CRX•Money platform can sync it.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!--
+      Package validation checks the package for compatibility problems. After the first stable
+      release, set PackageValidationBaselineVersion to the last shipped version so binary-breaking
+      changes fail the build (see docs/versioning.md).
+    -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+</Project>
