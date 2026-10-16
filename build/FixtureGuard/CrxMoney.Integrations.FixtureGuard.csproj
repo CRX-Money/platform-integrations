@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <Description>CI guard that fails when test fixtures contain values resembling real Brazilian personal or banking identifiers.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CrxMoney.Integrations.FixtureGuard.Tests" />
+  </ItemGroup>
+
+</Project>

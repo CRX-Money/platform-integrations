@@ -1,0 +1,53 @@
+name: New provider or format request
+description: Ask for (or offer to build) support for a bank, exchange or statement format.
+labels: [provider-request]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One provider or format per request. Never include credentials, certificates or real statements.
+  - type: input
+    id: provider
+    attributes:
+      label: Provider or format
+      placeholder: Banco Example (API) / CNAB 240 / OFX 2.2
+    validations:
+      required: true
+  - type: input
+    id: country
+    attributes:
+      label: Country (ISO 3166-1 alpha-2) or "global"
+      placeholder: br
+    validations:
+      required: true
+  - type: dropdown
+    id: access
+    attributes:
+      label: How is the data obtained?
+      options:
+        - Official API
+        - Open Finance
+        - Statement file (OFX, CSV, CNAB, PDF)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: documentation
+    attributes:
+      label: Public documentation
+      description: Links to the provider's developer documentation, sandbox and file specification.
+  - type: textarea
+    id: data
+    attributes:
+      label: What should be imported
+      description: Balances, transactions, trades, transfers; which fields matter to you.
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Will you contribute the implementation?
+      options:
+        - "Yes, I would like to open the pull request"
+        - "Maybe, with guidance"
+        - "No, this is a request"
+    validations:
+      required: true

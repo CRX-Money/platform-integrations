@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  SOLUTION: CrxMoney.Integrations.slnx
+
+jobs:
+  # The job id and name "ci" are the required status check on main (docs/repository-settings.md).
+  # It always runs and reports, and narrows its own scope, so docs-only changes still pass the check.
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # MinVer and change detection need the history and tags.
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Select tests
+        id: select
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: bash build/ci/select-tests.sh "$BASE_SHA"
+
+      - name: Fixture guard
+        run: dotnet run --project build/FixtureGuard --configuration Release -- tests
+
+      - name: Restore
+        if: steps.select.outputs.scope != 'none'
+        run: dotnet restore "$SOLUTION"
+
+      - name: Build
+        if: steps.select.outputs.scope != 'none'
+        run: dotnet build "$SOLUTION" --configuration Release --no-restore
+
+      - name: Test (all)
+        if: steps.select.outputs.scope == 'full'
+        run: >
+          dotnet test --solution "$SOLUTION" --configuration Release --no-build
+          --results-directory TestResults --results-directory-layout per-module
+          --report-xunit-trx --progress off
+
+      - name: Test (changed providers and formats)
+        if: steps.select.outputs.scope == 'partial'
+        env:
+          PROJECTS: ${{ steps.select.outputs.projects }}
+        run: |
+          status=0
+          for project in $PROJECTS; do
+            dotnet test --project "$project" --configuration Release --no-build \
+              --results-directory TestResults --results-directory-layout per-module \
+              --report-xunit-trx --progress off || status=1
+          done
+          exit $status
+
+      - name: Pack (validation only)
+        if: steps.select.outputs.scope == 'full'
+        run: dotnet pack "$SOLUTION" --configuration Release --no-build --output artifacts/packages
+
+      - name: Upload test results
+        if: always() && steps.select.outputs.scope != 'none'
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: TestResults/**/*.trx
+          if-no-files-found: ignore

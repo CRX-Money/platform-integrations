@@ -1,0 +1,55 @@
+<Project>
+  <!--
+    Shared settings for every project in this repository. Imported by the root
+    Directory.Build.props; keep project files limited to what is specific to them.
+  -->
+
+  <PropertyGroup Label="Language and analysis">
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <PropertyGroup Label="CI" Condition="'$(GITHUB_ACTIONS)' == 'true' or '$(TF_BUILD)' == 'true'">
+    <!-- Normalises source paths in PDBs so builds are reproducible. -->
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Package metadata">
+    <!-- Projects opt in with <IsPackable>true</IsPackable>. -->
+    <IsPackable>false</IsPackable>
+    <Authors>CRX•Money contributors</Authors>
+    <Company>CRX•Money</Company>
+    <Product>CRX•Money Platform integrations</Product>
+    <Copyright>Copyright (c) CRX•Money contributors</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/CRX-Money/platform-integrations</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/CRX-Money/platform-integrations.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>crx-money;integrations;open-banking;finance</PackageTags>
+    <!-- No PackageIcon on purpose: brand assets are not redistributed through packages (see README). -->
+  </PropertyGroup>
+
+  <PropertyGroup Label="SourceLink and symbols">
+    <!-- The .NET SDK ships SourceLink for GitHub; these switch it on fully. -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <DebugType>portable</DebugType>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Versioning (MinVer, tag-based SemVer)">
+    <!-- Tags look like v1.0.0-preview.1. Untagged commits build as 0.0.0-preview.0.<height>. -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>preview.0</MinVerDefaultPreReleaseIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

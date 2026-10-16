@@ -1,0 +1,40 @@
+name: Bug report
+description: A provider, format or the contract package behaves incorrectly.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Do not paste real statements, account numbers, CPF/CNPJ, Pix keys, tokens or certificates.**
+        Describe values ("a credit of 12.34 BRL on 2026-01-02") or use synthetic ones. Security problems go to admin@crx.money, not here.
+  - type: input
+    id: package
+    attributes:
+      label: Package and version
+      placeholder: CrxMoney.Integrations.Abstractions 1.0.0-preview.1
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: Steps or a minimal synthetic fixture (see docs/fixture-policy.md for allowed forms).
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: .NET version, operating system, and the provider API or file version if relevant.
+  - type: checkboxes
+    id: sanitised
+    attributes:
+      label: Data check
+      options:
+        - label: This report contains no real personal, banking or credential data.
+          required: true
