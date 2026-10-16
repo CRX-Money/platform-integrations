@@ -66,11 +66,12 @@ jobs:
           PROJECTS: ${{ steps.select.outputs.projects }}
         run: |
           status=0
-          for project in $PROJECTS; do
+          while IFS= read -r project; do
+            [ -n "$project" ] || continue
             dotnet test --project "$project" --configuration Release --no-build \
               --results-directory TestResults --results-directory-layout per-module \
               --report-xunit-trx --progress off || status=1
-          done
+          done <<< "$PROJECTS"
           exit $status
 
       - name: Pack (validation only)

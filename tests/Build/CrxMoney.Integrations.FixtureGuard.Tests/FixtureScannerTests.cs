@@ -83,10 +83,26 @@ public sealed class FixtureScannerTests
     [Fact]
     public void Flags_phone_numbers_with_real_area_codes()
     {
-        Assert.Equal(["FG004"], Rules("\"chavePix\": \"+55" + "11912345678\""));
+        Assert.Equal(["FG004"], Rules("\"chavePix\": \"+5" + "511912345678\""));
         Assert.Equal(["FG004"], Rules("Telefone (21) 9" + "8765-4321"));
         Assert.Empty(Rules("\"chavePix\": \"+5510912345678\""));
         Assert.Empty(Rules("Telefone (20) 98765-4321"));
+    }
+
+    [Fact]
+    public void Flags_national_mobile_numbers_only_in_pix_context()
+    {
+        Assert.Equal(["FG004"], Rules("\"chavePix\": \"11 9" + "1234-5678\""));
+        Assert.Empty(Rules("\"chavePix\": \"10 91234-5678\""));
+        Assert.Empty(Rules("\"numeroDocumento\": \"11 91234-5678\""));
+    }
+
+    [Fact]
+    public void Flags_agency_and_account_with_spaced_json_colons()
+    {
+        var json = "\"agencia\" : \"1234\",\n\"conta\" : \"" + "4821397-7\"";
+
+        Assert.Equal(["FG006"], Rules(json));
     }
 
     [Fact]

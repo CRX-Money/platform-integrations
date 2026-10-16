@@ -4,14 +4,15 @@
 # Usage: build/ci/select-tests.sh <base-sha>
 # Writes to $GITHUB_OUTPUT (or stdout):
 #   scope=full|partial|none
-#   projects=<space-separated test project paths>   (partial only)
+#   projects=<test project paths, one per line>        (partial only)
 #
-# Rules, applied per changed file:
-#   *.md, docs/**, LICENSE, issue/PR templates, CODEOWNERS  -> no tests
+# Rules, applied per changed file, first match wins:
+#   src/Abstractions/** (its README is packed)               -> full
 #   src|tests/Providers/<cc>/<Provider>/**                   -> tests/Providers/<cc>/<Provider>
 #   src|tests/Formats/<Format>/**                            -> tests/Formats/<Format>
 #   src|tests/Countries/<cc>/**                              -> tests/Countries/<cc> and every tests/Providers/<cc>/*
-#   anything else (contract, build, workflows, shared props) -> full
+#   other *.md, docs/**, LICENSE, issue/PR templates, CODEOWNERS -> no tests
+#   anything else (build, workflows, shared props)           -> full
 # A missing or unknown base (new branch, manual run) means full.
 set -euo pipefail
 
@@ -20,7 +21,7 @@ out="${GITHUB_OUTPUT:-/dev/stdout}"
 
 emit() {
   echo "scope=$1" >> "$out"
-  echo "projects=${2:-}" >> "$out"
+  printf 'projects<<EOF_PROJECTS\n%s\nEOF_PROJECTS\n' "${2:-}" >> "$out"
   echo "Test scope: $1 ${2:-}" >&2
 }
 
@@ -34,7 +35,8 @@ full=false
 while IFS= read -r file; do
   [[ -z "$file" ]] && continue
   case "$file" in
-    *.md|docs/*|LICENSE|.github/ISSUE_TEMPLATE/*|.github/pull_request_template.md|.github/CODEOWNERS)
+    src/Abstractions/*)
+      full=true
       ;;
     src/Providers/*/*/*|tests/Providers/*/*/*)
       IFS=/ read -r _ _ country provider _ <<< "$file"
@@ -50,6 +52,8 @@ while IFS= read -r file; do
       for provider in tests/Providers/"$country"/*/; do
         [[ -d "$provider" ]] && dirs["${provider%/}"]=1
       done
+      ;;
+    *.md|docs/*|LICENSE|.github/ISSUE_TEMPLATE/*|.github/pull_request_template.md|.github/CODEOWNERS)
       ;;
     *)
       full=true
@@ -71,11 +75,11 @@ projects=()
 for dir in "${!dirs[@]}"; do
   mapfile -t found < <(find "$dir" -name '*.Tests.csproj' -not -path '*/bin/*' -not -path '*/obj/*' 2>/dev/null | sort)
   if [[ ${#found[@]} -eq 0 ]]; then
-    if [[ -d "${dir/#tests/src}" ]]; then
+    # Placeholder folders (README only) need no tests; code does.
+    if [[ -n "$(find "${dir/#tests/src}" -name '*.csproj' 2>/dev/null)" ]]; then
       echo "::error title=Missing tests::${dir/#tests/src} changed but $dir has no *.Tests.csproj. Every provider and format ships with tests (CONTRIBUTING.md)." >&2
       exit 1
     fi
-    # Directory removed in this change: nothing left to test.
     continue
   fi
   projects+=("${found[@]}")
@@ -84,5 +88,5 @@ done
 if [[ ${#projects[@]} -eq 0 ]]; then
   emit none
 else
-  emit partial "$(printf '%s\n' "${projects[@]}" | sort -u | tr '\n' ' ' | sed 's/ $//')"
+  emit partial "$(printf '%s\n' "${projects[@]}" | sort -u)"
 fi

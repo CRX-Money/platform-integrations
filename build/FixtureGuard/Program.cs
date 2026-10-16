@@ -43,6 +43,14 @@ if (File.Exists(allowlistPath))
     }
 }
 
+var missing = roots.Where(root => !File.Exists(root) && !Directory.Exists(root)).ToList();
+if (missing.Count > 0)
+{
+    // A wrong path must not turn the guard into a silent no-op.
+    Console.Error.WriteLine($"Path not found: {string.Join(", ", missing)}. Run from the repository root.");
+    return 2;
+}
+
 var annotate = Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true";
 var allowlistFullPath = Path.GetFullPath(allowlistPath);
 var findings = new List<Finding>();
@@ -57,15 +65,14 @@ foreach (var file in roots.SelectMany(FixtureFiles.Enumerate).Distinct())
     }
 
     var relative = Path.GetRelativePath(Directory.GetCurrentDirectory(), file).Replace('\\', '/');
-    var bytes = File.ReadAllBytes(file);
-    if (FixtureFiles.IsBinary(bytes))
+    var text = FixtureFiles.ReadText(File.ReadAllBytes(file));
+    if (text is null)
     {
         skippedBinary.Add(relative);
         continue;
     }
 
     scanned++;
-    var text = System.Text.Encoding.UTF8.GetString(bytes);
     findings.AddRange(FixtureScanner.Scan(relative, text).Where(finding => !allowlist.Allows(finding.Value)));
 }
 
@@ -74,15 +81,20 @@ foreach (var finding in findings)
     // Values are masked: if a real identifier slipped in, the CI log must not republish it.
     var message = $"{finding.Rule} {finding.Description} ({finding.Masked}). See docs/fixture-policy.md.";
     Console.WriteLine(annotate
-        ? $"::error file={finding.Path},line={finding.Line},title=Fixture guard {finding.Rule}::{message}"
+        ? $"::error file={EscapeProperty(finding.Path)},line={finding.Line},title=Fixture guard {finding.Rule}::{EscapeData(message)}"
         : $"{finding.Path}({finding.Line}): {message}");
 }
 
 foreach (var path in skippedBinary)
 {
     var message = "binary file not scanned; a maintainer must confirm it holds no real data.";
-    Console.WriteLine(annotate ? $"::warning file={path},title=Fixture guard::{message}" : $"{path}: {message}");
+    Console.WriteLine(annotate ? $"::warning file={EscapeProperty(path)},title=Fixture guard::{message}" : $"{path}: {message}");
 }
 
 Console.WriteLine($"Fixture guard: {scanned} text file(s) scanned, {skippedBinary.Count} binary skipped, {findings.Count} finding(s).");
 return findings.Count == 0 ? 0 : 1;
+
+// GitHub workflow-command escaping for messages and for property values.
+static string EscapeData(string value) => value.Replace("%", "%25").Replace("\r", "%0D").Replace("\n", "%0A");
+
+static string EscapeProperty(string value) => EscapeData(value).Replace(":", "%3A").Replace(",", "%2C");

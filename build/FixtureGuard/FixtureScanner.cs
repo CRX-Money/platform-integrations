@@ -71,7 +71,14 @@ internal static partial class FixtureScanner
                 }
             }
 
-            foreach (Match match in Phone().Matches(line))
+            var phoneMatches = Phone().Matches(line).AsEnumerable();
+            if (pixContext)
+            {
+                // Pix phone keys are also written nationally, without +55: 11 91234-5678, 11912345678.
+                phoneMatches = phoneMatches.Concat(NationalMobile().Matches(line));
+            }
+
+            foreach (var match in phoneMatches.DistinctBy(match => match.Index))
             {
                 if (!SyntheticValues.IsSyntheticPhone(match.Groups["ddd"].Value))
                 {
@@ -148,15 +155,20 @@ internal static partial class FixtureScanner
     [GeneratedRegex(@"(?:\+55[\s\-]?\(?(?<ddd>\d{2})\)?[\s\-]?9?\d{4}[\s\-]?\d{4}|\((?<ddd>\d{2})\)\s?9?\d{4}-?\d{4})(?!\d)")]
     private static partial Regex Phone();
 
+    // 11 91234-5678, 11912345678 (mobile numbers only, to stay clear of other 10-digit values).
+    [GeneratedRegex(@"(?<![\d+])(?<ddd>[1-9]\d)[\s\-]?9\d{4}[\s\-]?\d{4}(?!\d)")]
+    private static partial Regex NationalMobile();
+
     [GeneratedRegex(@"(?<![0-9a-fA-F])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9a-fA-F])")]
     private static partial Regex Uuid();
 
     [GeneratedRegex(@"<ACCTID>(?<value>[^<\r\n]*)", RegexOptions.IgnoreCase)]
     private static partial Regex OfxAccountId();
 
-    [GeneratedRegex(@"(?i)(?:ag[eê]ncia|\bag\b\.?|branch(?:id)?|bankbranch)\W{0,4}\d{3,5}")]
+    // "ag.ncia" also matches Agência when a legacy-encoded file mangles the accent. The gap allows `" : "`.
+    [GeneratedRegex(@"(?i)(?:ag.ncia|\bag\b\.?|branch(?:id)?|bankbranch)\W{0,6}\d{3,5}")]
     private static partial Regex Agency();
 
-    [GeneratedRegex(@"(?i)(?:conta(?:\s?corrente)?|n[uú]mero\s?(?:da\s)?conta|\bc/?c\b|account(?:number)?)\W{0,4}(?<value>\d[\d.\-]{3,18}[\dXx]?)")]
+    [GeneratedRegex(@"(?i)(?:conta(?:\s?corrente)?|n[uú]mero\s?(?:da\s)?conta|\bc/?c\b|account(?:number)?)\W{0,6}(?<value>\d[\d.\-]{3,18}[\dXx]?)")]
     private static partial Regex Account();
 }

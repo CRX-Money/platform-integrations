@@ -53,7 +53,7 @@ internal static class SyntheticValues
 
         var domain = email[(at + 1)..].ToLowerInvariant();
         return ReservedEmailDomains.Any(reserved => domain == reserved || domain.EndsWith("." + reserved, StringComparison.Ordinal))
-            || ReservedEmailSuffixes.Any(domain.EndsWith);
+            || ReservedEmailSuffixes.Any(suffix => domain.EndsWith(suffix, StringComparison.Ordinal));
     }
 
     /// <summary>
