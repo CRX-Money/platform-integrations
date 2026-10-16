@@ -47,6 +47,22 @@ public sealed class InterStatementPlanTests
     }
 
     [Fact]
+    public void Replaying_an_old_window_keeps_the_later_checkpoint()
+    {
+        var plan = InterStatementPlan.Create(Request(Utc(2026, 1, 10), Utc(2026, 1, 31), "2026-10-15"), Today, FullHistoryFrom, Options);
+
+        Assert.Equal(new DateOnly(2026, 1, 31), plan.To);
+        Assert.Equal(new DateOnly(2026, 10, 15), plan.CheckpointDate);
+    }
+
+    [Fact]
+    public void Full_history_says_it_starts_at_the_backfill_anchor()
+    {
+        Assert.True(InterStatementPlan.Create(Request(null, null), Today, FullHistoryFrom, Options).StartsAtBackfillAnchor);
+        Assert.False(InterStatementPlan.Create(Request(Utc(2026, 1, 10), null), Today, FullHistoryFrom, Options).StartsAtBackfillAnchor);
+    }
+
+    [Fact]
     public void An_earlier_host_window_wins_over_the_checkpoint()
     {
         var plan = InterStatementPlan.Create(Request(Utc(2026, 1, 10), null, "2026-10-15"), Today, FullHistoryFrom, Options);

@@ -11,9 +11,15 @@ namespace CrxMoney.Integrations.Providers.Br.Inter.Sync;
 /// The start is the earliest of: the host's window start, and the last synced date (checkpoint)
 /// minus <see cref="InterIntegrationOptions.StatementOverlapDays"/>. Without either (a full-history
 /// backfill) it is the plugin's suggested backfill date. The end is the host's window end, never
-/// later than today in Brazil. The checkpoint written back is the end date.
+/// later than today in Brazil. The checkpoint written back is the end date, or the previous checkpoint
+/// when that is later (a replay of an old window must not move the cursor back).
 /// </remarks>
-internal sealed record InterStatementPlan(DateOnly From, DateOnly To, IReadOnlyList<(DateOnly From, DateOnly To)> Windows)
+internal sealed record InterStatementPlan(
+    DateOnly From,
+    DateOnly To,
+    IReadOnlyList<(DateOnly From, DateOnly To)> Windows,
+    DateOnly CheckpointDate,
+    bool StartsAtBackfillAnchor)
 {
     public const string CheckpointResource = "statement";
 
@@ -46,7 +52,8 @@ internal sealed record InterStatementPlan(DateOnly From, DateOnly To, IReadOnlyL
             windows.Add((windowFrom, windowTo < to ? windowTo : to));
         }
 
-        return new InterStatementPlan(effectiveFrom, to, windows);
+        var checkpointDate = checkpoint is { } previous && previous > to ? previous : to;
+        return new InterStatementPlan(effectiveFrom, to, windows, checkpointDate, StartsAtBackfillAnchor: from is null);
     }
 
     public static IntegrationCheckpoint CheckpointFor(DateOnly lastSyncedDate) =>

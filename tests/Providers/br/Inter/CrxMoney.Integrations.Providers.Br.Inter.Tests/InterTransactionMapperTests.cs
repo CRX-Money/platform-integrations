@@ -164,6 +164,6 @@ public sealed class InterTransactionMapperTests
     public void Banking_today_follows_the_brazilian_calendar()
     {
         // 01:30 UTC on 17 October is still 16 October in São Paulo (UTC-3).
-        Assert.Equal(new DateOnly(2026, 10, 16), InterTransactionMapper.BankingToday(new DateTimeOffset(2026, 10, 17, 1, 30, 0, TimeSpan.Zero)));
+        Assert.Equal(new DateOnly(2026, 10, 16), InterTransactionMapper.BankingDate(new DateTimeOffset(2026, 10, 17, 1, 30, 0, TimeSpan.Zero)));
     }
 }

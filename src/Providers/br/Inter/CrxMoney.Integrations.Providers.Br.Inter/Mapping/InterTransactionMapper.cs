@@ -20,7 +20,7 @@ internal static class InterTransactionMapper
     public const string InvestmentTransactionType = "INVESTIMENTO";
 
     /// <summary>The time zone whose calendar Inter books in.</summary>
-    public static readonly TimeZoneInfo BankingTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
+    public static readonly TimeZoneInfo BankingTimeZone = FindBankingTimeZone();
 
     /// <summary>
     /// The idempotency recipe: connection + Inter's transaction id. Changing it in a released version
@@ -79,12 +79,15 @@ internal static class InterTransactionMapper
         return new DateTimeOffset(local, BankingTimeZone.GetUtcOffset(local));
     }
 
-    /// <summary>Today's date in Brazil.</summary>
-    public static DateOnly BankingToday(DateTimeOffset utcNow) =>
-        DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(utcNow, BankingTimeZone).DateTime);
+    /// <summary>The Brazilian calendar date of an instant (pass the current time for "today").</summary>
+    public static DateOnly BankingDate(DateTimeOffset instant) =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, BankingTimeZone).DateTime);
 
-    /// <summary>The Brazilian calendar date of an instant.</summary>
-    public static DateOnly BankingDate(DateTimeOffset instant) => BankingToday(instant);
+    // IANA ids resolve on Linux, macOS and Windows with ICU; Windows in NLS mode only knows its own id.
+    private static TimeZoneInfo FindBankingTimeZone() =>
+        TimeZoneInfo.TryFindSystemTimeZoneById("America/Sao_Paulo", out var zone)
+            ? zone
+            : TimeZoneInfo.FindSystemTimeZoneById("E. South America Standard Time");
 
     internal static DateOnly? ParseBookingDate(string? value)
     {

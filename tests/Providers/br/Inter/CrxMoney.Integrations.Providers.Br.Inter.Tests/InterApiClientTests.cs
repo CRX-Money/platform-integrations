@@ -54,6 +54,22 @@ public sealed class InterApiClientTests
     }
 
     [Fact]
+    public async Task A_short_lived_token_is_still_reused_for_part_of_its_life()
+    {
+        var server = new FakeInterServer().OnToken(expiresIn: 30);
+        using var client = Client(server);
+        var ct = TestContext.Current.CancellationToken;
+
+        await client.GetAccessTokenAsync(InterApiClient.StatementReadScope, ct);
+        _time.Advance(TimeSpan.FromSeconds(10));
+        await client.GetAccessTokenAsync(InterApiClient.StatementReadScope, ct);
+        _time.Advance(TimeSpan.FromSeconds(6));
+        await client.GetAccessTokenAsync(InterApiClient.StatementReadScope, ct);
+
+        Assert.Equal(2, server.RequestsTo("/oauth/v2/token").Count);
+    }
+
+    [Fact]
     public async Task Concurrent_callers_share_one_token_request()
     {
         var release = new TaskCompletionSource();

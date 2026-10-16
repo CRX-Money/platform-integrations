@@ -58,6 +58,22 @@ public sealed class InterTransactionDetailsReaderTests
     }
 
     [Fact]
+    public void Type_descriptors_and_bank_names_are_not_taken_as_values()
+    {
+        var details = Details("""
+            {"tipoChavePix":"EMAIL","tipoContaRecebedor":"CORRENTE","nomeBancoRecebedor":"Banco Exemplo S.A.",
+             "nomeRecebedor":"Fulano de Tal","contaRecebedor":"99999-9","chavePixRecebedor":"fulano@example.com"}
+            """);
+
+        var (counterparty, pix) = InterTransactionDetailsReader.Read(details, isCredit: false);
+
+        Assert.Equal("Fulano de Tal", counterparty.Name);
+        Assert.Equal("Banco Exemplo S.A.", counterparty.Bank);
+        Assert.Equal("99999-9", counterparty.Account);
+        Assert.Equal("fulano@example.com", pix.Key);
+    }
+
+    [Fact]
     public void Masked_or_invalid_tax_ids_are_not_used()
     {
         var details = Details("""{"nomePagador":"Fulano","cpfCnpjPagador":"***.456.789-**","cpf":"123.456.789-00"}""");

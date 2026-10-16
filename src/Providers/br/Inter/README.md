@@ -42,11 +42,11 @@ and the whole `detalhes` object verbatim, and adds:
 
 Inter's reference and its SDKs leave `detalhes` untyped, and its keys vary with
 `tipoTransacao`. The plugin therefore recognises fields by the words in their key
-path instead of by a fixed list: `nome…` is a name, `cpf…`/`cnpj…` a tax id,
+path instead of by a fixed list: `nome…` is a name (`nomeBanco…` is the bank), `cpf…`/`cnpj…` a tax id,
 `agencia…`, `conta…`, `banco…`, `endToEnd…`, `txId`, `chave…`; `pagador`,
 `remetente`, `origem` mark the payer and `recebedor`, `beneficiario`,
 `favorecido`, `destinatario`, `destino` the payee (also as parent objects, such as
-`recebedor.cpfCnpj`). Fields of the account holder's own side are ignored. A tax
+`recebedor.cpfCnpj`); `tipo…` keys describe a value and are skipped. Fields of the account holder's own side are ignored. A tax
 id is only reported when its check digits are valid (the alphanumeric CNPJ of
 2026 included), so a masked value such as `***.456.789-**` never becomes an
 identifier. Nothing is lost when a key is not recognised: `detalhes` is always
@@ -107,8 +107,11 @@ the import's `ExternalAccountId`.
   read (`yyyy-MM-dd`). The next sync starts three days before it (overlap,
   configurable), or at the host's window start if that is earlier, so entries
   Inter books late are still picked up; the idempotency keys make re-reading
-  harmless. With neither a checkpoint nor a window start (full-history backfill)
-  it starts at `Defaults.SuggestedBackfillFromDate` (2025-01-01).
+  harmless. A replay of an older window never moves the checkpoint back. With
+  neither a checkpoint nor a window start (full-history backfill) it starts at
+  `Defaults.SuggestedBackfillFromDate` (2025-01-01) and says so in the diagnostics
+  (`startsAtBackfillAnchor`); to import earlier history, run the backfill with an
+  explicit start date.
 - **Failures.** Every expected problem returns `IntegrationSyncResult.Failure`:
   bad or missing credentials and certificates are `Configuration` or
   `Authentication`; a missing scope is `Permission`; persistent HTTP 429 is

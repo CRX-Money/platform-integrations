@@ -51,6 +51,7 @@ public sealed class InterIntegrationPluginTests
         Assert.All(server.RequestsTo("/banking/v2/extrato/completo"), r => Assert.Equal("5", r.Query("tamanhoPagina")));
         Assert.Single(server.RequestsTo("/oauth/v2/token"));
         Assert.Equal([new IntegrationCheckpoint("statement", "2026-03-31")], result.Checkpoints);
+        Assert.False(JsonNode.Parse(result.ProviderDiagnosticsJson!)!["startsAtBackfillAnchor"]!.GetValue<bool>());
     }
 
     [Fact]

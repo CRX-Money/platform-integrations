@@ -127,6 +127,9 @@ internal static class InterTransactionDetailsReader
     /// <summary>The leaf key decides the kind; the role comes from the leaf key first, then the nearest parent.</summary>
     private static FieldKind KindOf(string key)
     {
+        // "tipoChavePix": "EMAIL", "tipoConta": "CORRENTE" describe a value; they are not one.
+        if (key.StartsWith("tipo", StringComparison.Ordinal))
+            return FieldKind.Unknown;
         if (key.Contains("endtoend", StringComparison.Ordinal) || key.Contains("e2e", StringComparison.Ordinal))
             return FieldKind.EndToEndId;
         if (key.Contains("txid", StringComparison.Ordinal))
@@ -135,14 +138,15 @@ internal static class InterTransactionDetailsReader
             return FieldKind.PixKey;
         if (key.Contains("cpf", StringComparison.Ordinal) || key.Contains("cnpj", StringComparison.Ordinal))
             return FieldKind.TaxId;
+        // Bank before name: "nomeBanco" / "nomeInstituicao" name the bank, not the counterparty.
+        if (key.Contains("banco", StringComparison.Ordinal) || key.Contains("instituicao", StringComparison.Ordinal) || key.Contains("ispb", StringComparison.Ordinal))
+            return FieldKind.Bank;
         if (key.Contains("nome", StringComparison.Ordinal) || key.Contains("razaosocial", StringComparison.Ordinal))
             return FieldKind.Name;
         if (key.Contains("agencia", StringComparison.Ordinal))
             return FieldKind.Branch;
         if (key.Contains("conta", StringComparison.Ordinal))
             return FieldKind.Account;
-        if (key.Contains("banco", StringComparison.Ordinal) || key.Contains("instituicao", StringComparison.Ordinal) || key.Contains("ispb", StringComparison.Ordinal))
-            return FieldKind.Bank;
         return FieldKind.Unknown;
     }
 

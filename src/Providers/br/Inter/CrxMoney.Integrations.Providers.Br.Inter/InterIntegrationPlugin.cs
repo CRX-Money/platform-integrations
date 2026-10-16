@@ -116,7 +116,7 @@ public sealed class InterIntegrationPlugin : IIntegrationPlugin, IIntegrationImp
         DateTimeOffset startedAt,
         CancellationToken cancellationToken)
     {
-        var today = InterTransactionMapper.BankingToday(startedAt);
+        var today = InterTransactionMapper.BankingDate(startedAt);
         var plan = InterStatementPlan.Create(request, today, Defaults.SuggestedBackfillFromDate ?? today, _clients.Options);
         var reader = new InterStatementReader(client, _clients.Options);
 
@@ -144,6 +144,8 @@ public sealed class InterIntegrationPlugin : IIntegrationPlugin, IIntegrationImp
             writer.WriteString("environment", EnvironmentName(client.Environment));
             writer.WriteString("from", plan.From.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             writer.WriteString("to", plan.To.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            // A full-history request starts at the plugin's backfill anchor; say so rather than imply all history was read.
+            writer.WriteBoolean("startsAtBackfillAnchor", plan.StartsAtBackfillAnchor);
             writer.WriteNumber("windows", plan.Windows.Count);
             writer.WriteNumber("pages", reader.PagesRead);
             writer.WriteNumber("entries", entries);
@@ -152,7 +154,7 @@ public sealed class InterIntegrationPlugin : IIntegrationPlugin, IIntegrationImp
                 writer.WriteString("certificateNotAfterUtc", notAfter);
         });
 
-        IntegrationCheckpoint[] checkpoints = plan.IsEmpty ? [] : [InterStatementPlan.CheckpointFor(plan.To)];
+        IntegrationCheckpoint[] checkpoints = plan.IsEmpty ? [] : [InterStatementPlan.CheckpointFor(plan.CheckpointDate)];
         return IntegrationSyncResult.Success(
             startedAt,
             _timeProvider.GetUtcNow(),

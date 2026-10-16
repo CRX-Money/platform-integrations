@@ -30,6 +30,7 @@ internal sealed class InterApiClient : IDisposable
     private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _tokenLock = new(1, 1);
     private readonly Dictionary<string, CachedToken> _tokens = new(StringComparer.Ordinal);
+    private long _lastUsedUtcTicks;
 
     public InterApiClient(
         HttpClient httpClient,
@@ -44,7 +45,7 @@ internal sealed class InterApiClient : IDisposable
         _timeProvider = timeProvider;
         _clientCertificate = clientCertificate;
         CertificateNotAfterUtc = clientCertificate is null ? null : new DateTimeOffset(clientCertificate.NotAfter.ToUniversalTime());
-        LastUsedUtc = timeProvider.GetUtcNow();
+        Touch();
     }
 
     public InterEnvironment Environment => _settings.Environment;
@@ -55,7 +56,7 @@ internal sealed class InterApiClient : IDisposable
     public DateTimeOffset? CertificateNotAfterUtc { get; }
 
     /// <summary>Last time this client was used, for idle eviction by the registry.</summary>
-    internal DateTimeOffset LastUsedUtc { get; private set; }
+    internal DateTimeOffset LastUsedUtc => new(Interlocked.Read(ref _lastUsedUtcTicks), TimeSpan.Zero);
 
     /// <summary>Returns a valid access token for <paramref name="scope"/>, requesting one only when the cached one is missing or about to expire.</summary>
     public async Task<string> GetAccessTokenAsync(string scope, CancellationToken cancellationToken)
@@ -70,8 +71,9 @@ internal sealed class InterApiClient : IDisposable
 
             var token = await RequestTokenAsync(scope, cancellationToken).ConfigureAwait(false);
             var lifetime = TimeSpan.FromSeconds(token.ExpiresIn is > 0 ? token.ExpiresIn.Value : 3600);
-            var renewAfter = now + lifetime - _options.TokenRefreshMargin;
-            _tokens[scope] = new CachedToken(token.AccessToken!, renewAfter > now ? renewAfter : now);
+            // Renew early, but never spend more than half a short-lived token's life on the margin.
+            var margin = _options.TokenRefreshMargin < lifetime / 2 ? _options.TokenRefreshMargin : lifetime / 2;
+            _tokens[scope] = new CachedToken(token.AccessToken!, now + lifetime - margin);
             return token.AccessToken!;
         }
         finally
@@ -168,7 +170,9 @@ internal sealed class InterApiClient : IDisposable
         var what = isTokenCall ? "token request" : "request";
         try
         {
-            return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            // ResponseContentRead: the body is downloaded inside the resilience pipeline, so it is covered
+            // by the attempt timeout and retried like any other transient failure.
+            return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
         }
         catch (HttpRequestException ex) when (ex.InnerException is AuthenticationException)
         {
@@ -248,7 +252,7 @@ internal sealed class InterApiClient : IDisposable
         }
     }
 
-    private void Touch() => LastUsedUtc = _timeProvider.GetUtcNow();
+    private void Touch() => Interlocked.Exchange(ref _lastUsedUtcTicks, _timeProvider.GetUtcNow().UtcTicks);
 
     private sealed record CachedToken(string AccessToken, DateTimeOffset RenewAfterUtc);
 }
