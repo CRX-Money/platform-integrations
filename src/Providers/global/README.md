@@ -4,8 +4,8 @@ Plugins for providers that work the same way across countries, such as crypto
 exchanges and international brokers. One folder per provider:
 
 ```
-src/Providers/global/<Provider>/CrxMoney.Integrations.Global.<Provider>.csproj
-tests/Providers/global/<Provider>/CrxMoney.Integrations.Global.<Provider>.Tests/
+src/Providers/global/<Provider>/CrxMoney.Integrations.Providers.Global.<Provider>.csproj
+tests/Providers/global/<Provider>/CrxMoney.Integrations.Providers.Global.<Provider>.Tests/
 ```
 
 Planned: **Binance**, moved from the CRX•Money platform once the contract
