@@ -1,7 +1,8 @@
 name: Publish
 
 # Releases every packable project to nuget.org when a version tag (v1.2.3, v1.0.0-preview.1) is pushed.
-# Steps and one-time setup: docs/releasing.md.
+# Authenticates with nuget.org Trusted Publishing (GitHub OIDC); the policy matches this file name, so keep
+# it named publish.yml. Steps and one-time setup: docs/releasing.md.
 on:
   push:
     tags: ['v*']
@@ -23,16 +24,10 @@ jobs:
     name: publish
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # GitHub OIDC token for nuget.org Trusted Publishing; no stored API key.
     steps:
-      - name: Require the NuGet API key
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: |
-          if [ -z "$NUGET_API_KEY" ]; then
-            echo "::error title=NUGET_API_KEY is not set::Add the repository secret NUGET_API_KEY (a nuget.org key that can push CrxMoney.* packages), then re-run this workflow. See docs/releasing.md."
-            exit 1
-          fi
-
       - name: Check out
         uses: actions/checkout@v7
         with:
@@ -82,9 +77,18 @@ jobs:
           name: packages
           path: artifacts/packages/
 
+      # Exchanges the OIDC token for a nuget.org API key valid for one hour, so it runs right before the push.
+      # `user` is the nuget.org account that CREATED the Trusted Publishing policy (nuget.org looks policies up
+      # by creator), not the crx-money organisation that owns the packages. See docs/releasing.md.
+      - name: Log in to nuget.org (Trusted Publishing)
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: crx-lc
+
       - name: Push to nuget.org
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
         # Symbol packages (.snupkg) next to each .nupkg are pushed automatically.
         run: >
           dotnet nuget push "artifacts/packages/*.nupkg"
