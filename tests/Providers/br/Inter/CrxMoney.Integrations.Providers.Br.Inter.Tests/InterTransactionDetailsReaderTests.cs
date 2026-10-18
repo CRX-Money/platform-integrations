@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CrxMoney.Integrations.Providers.Br.Inter.Mapping;
 using CrxMoney.Integrations.Providers.Br.Inter.Tests.Support;
+using CrxMoney.Integrations.Countries.Br;
 
 namespace CrxMoney.Integrations.Providers.Br.Inter.Tests;
 

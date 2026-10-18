@@ -1,0 +1,129 @@
+{
+  "results": [
+    {
+      "id": "00000000-0000-4000-8000-000000000c01",
+      "accountId": "00000000-0000-4000-8000-0000000000b1",
+      "date": "2026-09-01T12:15:30.000Z",
+      "description": "Pix recebido",
+      "descriptionRaw": "PIX RECEBIDO - CLIENTE EXEMPLO",
+      "amount": 1500,
+      "currencyCode": "BRL",
+      "type": "CREDIT",
+      "status": "POSTED",
+      "operationType": "PIX",
+      "operationTypeAdditionalInfo": null,
+      "order": 0,
+      "providerId": null,
+      "category": "Transfer - PIX",
+      "paymentData": {
+        "payer": {
+          "name": null,
+          "documentNumber": { "type": "CNPJ", "value": "{{CNPJ:1}}" },
+          "routingNumberISPB": "00000001",
+          "branchNumber": null,
+          "accountNumber": null
+        },
+        "receiver": {
+          "name": null,
+          "documentNumber": { "type": "CNPJ", "value": "{{CNPJ:9}}" },
+          "routingNumberISPB": null,
+          "branchNumber": null,
+          "accountNumber": null
+        },
+        "paymentMethod": "PIX",
+        "referenceNumber": null
+      },
+      "merchant": null,
+      "creditCardMetadata": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000c02",
+      "accountId": "00000000-0000-4000-8000-0000000000b1",
+      "date": "2026-09-02T14:00:00.000Z",
+      "description": "Pix enviado",
+      "descriptionRaw": "PIX ENVIADO - FULANO DE TAL",
+      "amount": -250.75,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": "PIX",
+      "operationTypeAdditionalInfo": null,
+      "order": 0,
+      "providerId": null,
+      "category": "Transfer - PIX",
+      "paymentData": {
+        "payer": null,
+        "receiver": {
+          "name": "Fulano de Tal",
+          "documentNumber": { "type": "CPF", "value": "{{CPF:1}}" },
+          "routingNumberISPB": "00000002",
+          "branchNumber": "0089",
+          "accountNumber": "23456789"
+        },
+        "paymentMethod": "PIX",
+        "referenceNumber": null
+      },
+      "merchant": null,
+      "creditCardMetadata": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000c03",
+      "accountId": "00000000-0000-4000-8000-0000000000b1",
+      "date": "2026-09-05T13:20:00.000Z",
+      "description": "Pagamento de boleto",
+      "descriptionRaw": "PAGAMENTO TITULO CONCESSIONARIA EXEMPLO",
+      "amount": -189.9,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": "BOLETO",
+      "operationTypeAdditionalInfo": null,
+      "order": 0,
+      "providerId": null,
+      "category": "Services",
+      "paymentData": {
+        "payer": null,
+        "receiver": {
+          "name": null,
+          "documentNumber": { "type": "CNPJ", "value": "{{CNPJ:2}}" },
+          "routingNumberISPB": null,
+          "branchNumber": null,
+          "accountNumber": null
+        },
+        "paymentMethod": "BOLETO",
+        "referenceNumber": null
+      },
+      "merchant": {
+        "businessName": "Concessionaria Exemplo S.A.",
+        "cnpj": "{{CNPJ:2}}",
+        "cnae": "0000000"
+      },
+      "creditCardMetadata": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000c04",
+      "accountId": "00000000-0000-4000-8000-0000000000b1",
+      "date": "2026-09-05T23:59:00.000Z",
+      "description": "Aplicacao",
+      "descriptionRaw": "APLICACAO CDB",
+      "amount": -5000,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": "OUTROS",
+      "operationTypeAdditionalInfo": "APL AUTOMATICA CDB LIQUIDEZ",
+      "order": 1,
+      "providerId": null,
+      "category": "Investments",
+      "paymentData": {
+        "payer": { "name": null, "documentNumber": { "type": "CNPJ", "value": "{{CNPJ:9}}" }, "routingNumberISPB": null, "branchNumber": null, "accountNumber": null },
+        "receiver": { "name": null, "documentNumber": { "type": "CNPJ", "value": "{{CNPJ:9}}" }, "routingNumberISPB": null, "branchNumber": null, "accountNumber": null },
+        "paymentMethod": "OTHER",
+        "referenceNumber": null
+      },
+      "merchant": null,
+      "creditCardMetadata": null
+    }
+  ],
+  "next": "synthetic-cursor-0001"
+}

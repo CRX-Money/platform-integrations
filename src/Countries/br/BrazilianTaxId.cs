@@ -1,15 +1,22 @@
-namespace CrxMoney.Integrations.Providers.Br.Inter.Mapping;
+namespace CrxMoney.Integrations.Countries.Br;
 
-/// <summary>A CPF or CNPJ whose check digits are valid, normalised to digits (and, for the 2026 alphanumeric CNPJ, upper-case letters).</summary>
-internal readonly record struct BrazilianTaxId(string Value, string Kind)
+/// <summary>
+/// A CPF (individuals) or CNPJ (companies) whose check digits are valid, normalised to digits and,
+/// for the alphanumeric CNPJ introduced by the Receita Federal in 2026, upper-case letters.
+/// </summary>
+/// <param name="Value">The normalised identifier, without punctuation.</param>
+/// <param name="Kind"><see cref="Cpf"/> or <see cref="Cnpj"/>.</param>
+public readonly record struct BrazilianTaxId(string Value, string Kind)
 {
+    /// <summary>Kind of an 11-digit individual taxpayer id.</summary>
     public const string Cpf = "CPF";
+
+    /// <summary>Kind of a 14-character company taxpayer id.</summary>
     public const string Cnpj = "CNPJ";
 
     /// <summary>
     /// Accepts a formatted or bare CPF/CNPJ and returns it only when the check digits are right.
-    /// Masked values (<c>***.456.789-**</c>) and placeholders fail, which keeps a guessed field from
-    /// being used as a tax id.
+    /// Masked values (<c>***.456.789-**</c>) and placeholders fail, so a misread field never becomes an identifier.
     /// </summary>
     public static BrazilianTaxId? TryParse(string? raw)
     {
@@ -58,8 +65,7 @@ internal readonly record struct BrazilianTaxId(string Value, string Kind)
         }
     }
 
-    // Receita Federal's CNPJ algorithm; since July 2026 the first 12 positions may be letters,
-    // valued as their ASCII code minus 48 ('0'), and the two check digits stay numeric.
+    // Letters in the first 12 positions are valued as their ASCII code minus 48 ('0'); the check digits stay numeric.
     private static bool IsValidCnpj(ReadOnlySpan<char> cnpj)
     {
         if (!char.IsAsciiDigit(cnpj[12]) || !char.IsAsciiDigit(cnpj[13]) || AllSame(cnpj))

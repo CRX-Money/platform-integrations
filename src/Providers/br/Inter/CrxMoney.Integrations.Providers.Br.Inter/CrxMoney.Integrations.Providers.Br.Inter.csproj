@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\..\Abstractions\CrxMoney.Integrations.Abstractions\CrxMoney.Integrations.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\..\Countries\br\CrxMoney.Integrations.Countries.Br.csproj" />
   </ItemGroup>
 
   <ItemGroup>

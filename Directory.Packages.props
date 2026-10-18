@@ -15,6 +15,7 @@
       DependencyInjection, Logging and Options abstractions the providers use.
     -->
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.11.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
   </ItemGroup>
 
   <ItemGroup Label="Tests">
