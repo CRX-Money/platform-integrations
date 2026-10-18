@@ -21,7 +21,7 @@ public sealed class BrazilBuildingBlocksTests
     [Theory]
     [InlineData("077/0001/12345678-9", "077", "0001", "123456789")]
     [InlineData("77 / 0001 / 0012345678-9", "077", "0001", "123456789")]
-    [InlineData("001/1234-5/99999-9", "001", "12345", "999999")]
+    [InlineData("001/1234-5/99999-9", "001", "1234", "999999")]
     public void Transfer_numbers_parse_into_the_bank_identity(string value, string compe, string branch, string number)
     {
         var account = BrazilianBankAccount.TryParseTransferNumber(value);

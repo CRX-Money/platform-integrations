@@ -73,6 +73,9 @@ Normalisation into the Open Finance model:
 - Investment positions (`/investments`) and identity pre-fill (`/identity`) are not
   read yet.
 - Pluggy categories are not imported; CRX•Money rules decide.
+- `/v2/transactions` has no date filter, so every sync downloads the account's full
+  history (the plugin sends only recent lines). Stopping early would need Pluggy to
+  document its page order.
 
 ## Tests
 

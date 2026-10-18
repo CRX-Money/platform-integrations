@@ -75,8 +75,31 @@ public sealed class OpenFinanceMappingTests
         Assert.NotEqual(baseline, OpenFinanceTransactionMapper.LineIdentity(Checking, Line("x", OpenFinanceDirection.Credit, 10m, counterparty: Party(3))));
         Assert.NotEqual(baseline, OpenFinanceTransactionMapper.LineIdentity(Checking, Line("x", OpenFinanceDirection.Debit, 10.01m, counterparty: Party(3))));
         Assert.NotEqual(baseline, OpenFinanceTransactionMapper.LineIdentity(Checking, Line("x", OpenFinanceDirection.Debit, 10m, Noon.AddSeconds(1), counterparty: Party(3))));
-        Assert.NotEqual(baseline, OpenFinanceTransactionMapper.LineIdentity(Checking, Line("x", OpenFinanceDirection.Debit, 10m, counterparty: Party(4))));
         Assert.NotEqual(baseline, OpenFinanceTransactionMapper.LineIdentity(Card, Line("x", OpenFinanceDirection.Debit, 10m, counterparty: Party(3))));
+    }
+
+    [Fact]
+    public void Counterparty_enrichment_arriving_later_does_not_change_the_key()
+    {
+        var bare = OpenFinanceTransactionMapper.LineIdentity(Checking, Line("x", OpenFinanceDirection.Debit, 10m));
+        var enriched = OpenFinanceTransactionMapper.LineIdentity(Checking, Line("x", OpenFinanceDirection.Debit, 10m, counterparty: Party(4)));
+
+        Assert.Equal(bare, enriched);
+    }
+
+    [Fact]
+    public void The_holder_on_the_other_side_is_not_a_counterparty()
+    {
+        var holder = BrazilianTaxId.TryParse(SyntheticTaxIds.Cnpj(9));
+        var account = Checking with { HolderTaxId = holder };
+        var sweep = Line("s", OpenFinanceDirection.Debit, 5000m, type: "OUTROS", detail: "APL AUTOMATICA CDB",
+            counterparty: new OpenFinanceParty(null, holder, null, null, null));
+
+        var data = JsonNode.Parse(OpenFinanceTransactionMapper.Map(account, sweep, 0, "A").ProviderData!)!;
+
+        Assert.True(data["counterpartyIsHolder"]!.GetValue<bool>());
+        Assert.Null(data["counterparty"]);
+        Assert.Equal("investment", data["transferHint"]!.GetValue<string>());
     }
 
     [Fact]
@@ -101,6 +124,8 @@ public sealed class OpenFinanceMappingTests
     [InlineData("BOLETO", "PAGAMENTO FATURA CARTAO", OpenFinanceDirection.Debit, "card_bill_payment")]
     [InlineData("PIX", "PIX RECEBIDO", OpenFinanceDirection.Credit, null)]
     [InlineData("OUTROS", "DARF", OpenFinanceDirection.Debit, null)]
+    [InlineData("OUTROS", "COMPRA APLICATIVO EXEMPLO", OpenFinanceDirection.Debit, null)]
+    [InlineData("OUTROS", "RESIDENCIAL EXEMPLO", OpenFinanceDirection.Debit, null)]
     public void Transfer_hints_recognise_sweeps_and_card_bill_payments(string type, string? detail, OpenFinanceDirection direction, string? expected)
     {
         Assert.Equal(expected, OpenFinanceTransactionMapper.TransferHint(Checking, Line("h", direction, 1m, type: type, detail: detail)));
@@ -119,8 +144,8 @@ public sealed class OpenFinanceMappingTests
         var noBank = Checking with { BankAccount = null };
         var noLast4 = Card with { CardLast4 = null };
 
-        Assert.Throws<InvalidOperationException>(() => noBank.ExternalAccountId);
-        Assert.Throws<InvalidOperationException>(() => noLast4.ExternalAccountId);
+        Assert.Throws<OpenFinanceIdentityException>(() => noBank.ExternalAccountId);
+        Assert.Throws<OpenFinanceIdentityException>(() => noLast4.ExternalAccountId);
     }
 
     [Fact]

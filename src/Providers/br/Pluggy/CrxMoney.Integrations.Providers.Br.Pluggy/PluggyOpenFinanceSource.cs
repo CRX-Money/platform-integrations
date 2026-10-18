@@ -36,15 +36,17 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
 
         var accounts = await api.GetAccountsAsync(credentials, itemId, cancellationToken).ConfigureAwait(false);
         // Pluggy gives cards no issuer code; a card belongs to the bank of the item's deposit account.
-        var issuerCompe = accounts
-            .Where(a => string.Equals(a.Type, "BANK", StringComparison.OrdinalIgnoreCase))
+        var bankAccounts = accounts.Where(a => string.Equals(a.Type, "BANK", StringComparison.OrdinalIgnoreCase)).ToList();
+        var issuerCompe = bankAccounts
             .Select(a => BrazilianBankAccount.TryParseTransferNumber(a.BankData?.TransferNumber)?.Compe)
             .FirstOrDefault(c => c is not null);
+        // An item belongs to one holder; its bank account carries the holder's CPF/CNPJ.
+        var holder = bankAccounts.Select(a => BrazilianTaxId.TryParse(a.TaxNumber)).FirstOrDefault(t => t is not null);
 
         var result = new List<OpenFinanceAccountTransactions>();
         foreach (var account in accounts)
         {
-            var normalized = NormalizeAccount(account, issuerCompe);
+            var normalized = NormalizeAccount(account, issuerCompe) with { HolderTaxId = holder };
             var lines = await api.GetAllTransactionsAsync(credentials, account.Id!, cancellationToken).ConfigureAwait(false);
             result.Add(new OpenFinanceAccountTransactions(normalized, lines.Select(l => NormalizeTransaction(normalized, l)).ToList()));
         }

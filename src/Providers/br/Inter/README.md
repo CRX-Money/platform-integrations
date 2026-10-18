@@ -173,8 +173,6 @@ checked against Inter without copying a response into this repository.
 - The `detalhes` keys are recognised by pattern, because Inter documents neither
   their names nor their shape. Confirm them with the sandbox probe when Inter's
   sandbox is available, and extend the word lists if a key is missed.
-- `BrazilianTaxId` (CPF/CNPJ check digits) is internal to this provider. Move it to
-  `src/Countries/br` when a second Brazilian provider needs it.
 - Balances are read only by the connection test; webhooks (Pix, boletos) and the
   PDF statement export are not used.
 

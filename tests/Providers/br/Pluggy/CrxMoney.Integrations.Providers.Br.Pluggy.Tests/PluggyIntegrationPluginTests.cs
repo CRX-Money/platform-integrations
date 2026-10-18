@@ -80,6 +80,7 @@ public sealed class PluggyIntegrationPluginTests
         Assert.Equal("Concessionaria Exemplo S.A.", Data(events["00000000-0000-4000-8000-000000000c03"])["counterparty"]!["name"]!.GetValue<string>());
 
         Assert.Equal("investment", Data(events["00000000-0000-4000-8000-000000000c04"])["transferHint"]!.GetValue<string>());
+        Assert.True(Data(events["00000000-0000-4000-8000-000000000c04"])["counterpartyIsHolder"]!.GetValue<bool>());
         Assert.Equal("investment", Data(events["00000000-0000-4000-8000-000000000c05"])["transferHint"]!.GetValue<string>());
         Assert.Null(Data(events["00000000-0000-4000-8000-000000000c06"])["transferHint"]);
         Assert.Equal("card_bill_payment", Data(events["00000000-0000-4000-8000-000000000c09"])["transferHint"]!.GetValue<string>());
@@ -225,6 +226,19 @@ public sealed class PluggyIntegrationPluginTests
 
         Assert.Equal(IntegrationSyncStatus.Succeeded, result.Status);
         Assert.Equal(2, server.RequestsTo("/auth").Count);
+    }
+
+    [Fact]
+    public async Task A_missing_product_is_a_permission_failure_without_re_authenticating()
+    {
+        var server = FakePluggyServer.WithFixtures().On("/v2/transactions", (_, _) =>
+            FakePluggyServer.Json("""{"message":"Product not enabled","code":403}""", HttpStatusCode.Forbidden));
+        using var host = new PluggyTestHost(server);
+
+        var result = await host.Plugin.SyncAsync(PluggyTestHost.Request(), Ct);
+
+        Assert.Equal(IntegrationErrorKind.Permission, result.ErrorKind);
+        Assert.Single(server.RequestsTo("/auth"));
     }
 
     [Fact]

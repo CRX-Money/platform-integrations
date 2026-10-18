@@ -28,14 +28,16 @@ internal sealed class PluggyApiKeyCache(TimeProvider timeProvider)
 {
     private static readonly TimeSpan KeyLifetime = TimeSpan.FromMinutes(110);
     private readonly ConcurrentDictionary<string, (string ApiKey, DateTimeOffset RenewAfter)> _keys = new(StringComparer.Ordinal);
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _gates = new(StringComparer.Ordinal);
 
     public async Task<string> GetAsync(PluggyCredentials credentials, Func<CancellationToken, Task<string>> mint, CancellationToken cancellationToken)
     {
         if (_keys.TryGetValue(credentials.CacheKey, out var cached) && cached.RenewAfter > timeProvider.GetUtcNow())
             return cached.ApiKey;
 
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // One lock per credential pair: a slow authentication never holds up other workspaces.
+        var gate = _gates.GetOrAdd(credentials.CacheKey, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_keys.TryGetValue(credentials.CacheKey, out cached) && cached.RenewAfter > timeProvider.GetUtcNow())
@@ -47,7 +49,7 @@ internal sealed class PluggyApiKeyCache(TimeProvider timeProvider)
         }
         finally
         {
-            _gate.Release();
+            gate.Release();
         }
     }
 
@@ -68,7 +70,10 @@ internal sealed class PluggyApiClient(HttpClient httpClient, PluggyApiKeyCache a
         return page.Results ?? [];
     }
 
-    /// <summary>Walks <c>GET /v2/transactions</c> by cursor. The endpoint takes no date filter, so this is every line Pluggy holds.</summary>
+    /// <summary>
+    /// Walks <c>GET /v2/transactions</c> by cursor. The endpoint takes no date filter, so this is every line
+    /// Pluggy holds; stopping early would need Pluggy's page order to be documented as date-descending.
+    /// </summary>
     public async Task<IReadOnlyList<JsonElement>> GetAllTransactionsAsync(PluggyCredentials credentials, string accountId, CancellationToken cancellationToken)
     {
         var lines = new List<JsonElement>();
@@ -115,8 +120,8 @@ internal sealed class PluggyApiClient(HttpClient httpClient, PluggyApiKeyCache a
             request.Headers.TryAddWithoutValidation("X-API-KEY", apiKey);
             using var response = await SendAsync(request, what, cancellationToken).ConfigureAwait(false);
 
-            // An expired or revoked API key: mint a new one once.
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden && attempt == 0)
+            // An expired or revoked API key: mint a new one once. 403 is a permission (product) problem, not a key problem.
+            if (response.StatusCode == HttpStatusCode.Unauthorized && attempt == 0)
             {
                 apiKeys.Invalidate(credentials);
                 continue;
@@ -165,7 +170,9 @@ internal sealed class PluggyApiClient(HttpClient httpClient, PluggyApiKeyCache a
 
         var kind = response.StatusCode switch
         {
-            HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => IntegrationErrorKind.Authentication,
+            HttpStatusCode.Unauthorized => IntegrationErrorKind.Authentication,
+            HttpStatusCode.Forbidden when isAuth => IntegrationErrorKind.Authentication,
+            HttpStatusCode.Forbidden => IntegrationErrorKind.Permission,
             HttpStatusCode.BadRequest when isAuth => IntegrationErrorKind.Authentication,
             HttpStatusCode.NotFound => IntegrationErrorKind.Configuration,
             HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity => IntegrationErrorKind.Validation,

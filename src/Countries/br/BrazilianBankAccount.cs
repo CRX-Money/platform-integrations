@@ -9,7 +9,7 @@ namespace CrxMoney.Integrations.Countries.Br;
 /// sources land on the same ledger account.
 /// </summary>
 /// <param name="Compe">Three-digit COMPE code of the institution (<c>077</c> for Banco Inter).</param>
-/// <param name="Branch">Branch (agência) digits without check digit, leading zeros kept (<c>0001</c>).</param>
+/// <param name="Branch">Branch (agência) digits without its check digit, leading zeros kept (<c>0001</c>).</param>
 /// <param name="Number">Account number digits including the check digit, leading zeros removed.</param>
 public sealed partial record BrazilianBankAccount(string Compe, string Branch, string Number)
 {
@@ -24,13 +24,14 @@ public sealed partial record BrazilianBankAccount(string Compe, string Branch, s
 
     /// <summary>
     /// Builds the identity from its parts, normalising punctuation: the COMPE code is padded to three
-    /// digits, the branch keeps its digits, and the account number keeps its check digit but loses
-    /// dashes, dots and leading zeros.
+    /// digits, the branch loses a check digit after a dash (<c>1234-5</c> becomes <c>1234</c>, as most
+    /// sources omit it), and the account number keeps its check digit but loses dashes, dots and leading zeros.
     /// </summary>
     /// <exception cref="FormatException">A part is empty or contains anything but digits and separators.</exception>
     public static BrazilianBankAccount Create(string compe, string branch, string number)
     {
-        var normalizedBranch = Digits(branch, "branch");
+        var dash = branch?.IndexOf('-') ?? -1;
+        var normalizedBranch = Digits(dash > 0 ? branch![..dash] : branch!, "branch");
         var normalizedNumber = Digits(number, "account number").TrimStart('0');
         if (normalizedNumber.Length == 0)
             throw new FormatException("The account number has no significant digits.");

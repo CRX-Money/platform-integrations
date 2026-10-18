@@ -34,6 +34,7 @@ public enum OpenFinanceDirection
 /// <param name="CardLast4">Last four digits of the card; required for cards.</param>
 /// <param name="CurrencyCode">ISO 4217 currency of the account.</param>
 /// <param name="Balance">The balance the source reports, when it does; used for the reconciliation check.</param>
+/// <param name="HolderTaxId">The account holder's CPF/CNPJ, when known: a counterparty equal to it is the holder moving money between its own accounts.</param>
 public sealed record OpenFinanceAccount(
     string SourceAccountId,
     OpenFinanceAccountKind Kind,
@@ -41,19 +42,23 @@ public sealed record OpenFinanceAccount(
     string? IssuerCompe,
     string? CardLast4,
     string CurrencyCode,
-    decimal? Balance)
+    decimal? Balance,
+    BrazilianTaxId? HolderTaxId = null)
 {
     /// <summary>The platform's external account id for this account; independent of the aggregator.</summary>
-    /// <exception cref="InvalidOperationException">The account lacks the identity its kind requires.</exception>
+    /// <exception cref="OpenFinanceIdentityException">The account lacks the identity its kind requires.</exception>
     public string ExternalAccountId => Kind switch
     {
         OpenFinanceAccountKind.Deposit => BankAccount?.ExternalAccountId
-            ?? throw new InvalidOperationException("A deposit account needs its COMPE/branch/number identity."),
+            ?? throw new OpenFinanceIdentityException("A deposit account needs its COMPE/branch/number identity."),
         OpenFinanceAccountKind.CreditCard when !string.IsNullOrWhiteSpace(IssuerCompe) && CardLast4 is { Length: 4 } last4
             => BrazilianBankAccount.CardExternalAccountId(IssuerCompe, last4),
-        _ => throw new InvalidOperationException("A card account needs its issuer COMPE code and last four digits."),
+        _ => throw new OpenFinanceIdentityException("A card account needs its issuer COMPE code and last four digits."),
     };
 }
+
+/// <summary>An account cannot be identified the bank's way, so no key can be built for it. The message is safe to show.</summary>
+public sealed class OpenFinanceIdentityException(string message) : Exception(message);
 
 /// <summary>The other side of a movement.</summary>
 /// <param name="Name">Name as the source reports it; may be absent.</param>

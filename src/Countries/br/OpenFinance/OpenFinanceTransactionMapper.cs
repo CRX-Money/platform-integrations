@@ -29,16 +29,16 @@ public static class OpenFinanceTransactionMapper
 
     /// <summary>
     /// The part of the idempotency key that identifies a line at the bank: account, instant to the
-    /// second, direction, amount and counterparty document. Identical lines are told apart by an
-    /// ordinal (see <see cref="IdempotencyKey"/>).
+    /// second, direction and amount. Counterparty data is deliberately left out: aggregators enrich it
+    /// after the fact and report it unevenly, so it would change keys. Identical lines are told apart
+    /// by an ordinal (see <see cref="IdempotencyKey"/>).
     /// </summary>
     public static string LineIdentity(OpenFinanceAccount account, OpenFinanceTransaction transaction) =>
         string.Join('|',
             account.ExternalAccountId,
             transaction.TransactionTime.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
             transaction.Direction == OpenFinanceDirection.Credit ? "C" : "D",
-            transaction.Amount.ToString("0.00", CultureInfo.InvariantCulture),
-            transaction.Counterparty?.TaxId?.Value ?? "-");
+            transaction.Amount.ToString("0.00", CultureInfo.InvariantCulture));
 
     /// <summary>
     /// The idempotency recipe: <c>brof:</c> + the first 32 hex digits of SHA-256(line identity + <c>|</c> + ordinal),
@@ -109,16 +109,21 @@ public static class OpenFinanceTransactionMapper
         if (type is "APLICACAO_FINANCEIRA" or "RESGATE_APLIC_FINANCEIRA")
             return InvestmentHint;
 
-        var text = Normalize($"{transaction.TypeDetail} {transaction.Description}");
+        var words = Words($"{transaction.TypeDetail} {transaction.Description}");
         if (account.Kind == OpenFinanceAccountKind.CreditCard)
-            return transaction.Direction == OpenFinanceDirection.Credit && ContainsAny(text, "PAGAMENTO", "PAGTO", "FATURA") ? CardBillPaymentHint : null;
+            return transaction.Direction == OpenFinanceDirection.Credit && words.Overlaps(CardPaymentWords) ? CardBillPaymentHint : null;
 
-        if (ContainsAny(text, "FATURA") && transaction.Direction == OpenFinanceDirection.Debit)
+        if (words.Contains("FATURA") && transaction.Direction == OpenFinanceDirection.Debit)
             return CardBillPaymentHint;
-        if (type is "OUTROS" or "OTHER" && ContainsAny(text, "APLIC", "RESG", "CDB", "LCI ", "LCA ", "POUPANCA"))
+        // Whole words only: "APLICATIVO" is an app purchase, "APL AUTOMATICA CDB" is a sweep.
+        if (type is "OUTROS" or "OTHER" && (words.Overlaps(InvestmentProducts) || words.Overlaps(InvestmentMovements)))
             return InvestmentHint;
         return null;
     }
+
+    private static readonly HashSet<string> CardPaymentWords = new(StringComparer.Ordinal) { "PAGAMENTO", "PAGTO", "FATURA" };
+    private static readonly HashSet<string> InvestmentProducts = new(StringComparer.Ordinal) { "CDB", "LCI", "LCA", "POUPANCA" };
+    private static readonly HashSet<string> InvestmentMovements = new(StringComparer.Ordinal) { "APLICACAO", "RESGATE" };
 
     private static string BuildProviderData(OpenFinanceAccount account, OpenFinanceTransaction transaction, string sourceName)
     {
@@ -150,7 +155,11 @@ public static class OpenFinanceTransactionMapper
                 writer.WriteEndObject();
             }
 
-            if (transaction.Counterparty is { IsEmpty: false } party)
+            if (IsHolder(account, transaction.Counterparty))
+            {
+                writer.WriteBoolean("counterpartyIsHolder", true);
+            }
+            else if (transaction.Counterparty is { IsEmpty: false } party)
             {
                 writer.WriteStartObject("counterparty");
                 WriteOptional(writer, "name", party.Name);
@@ -188,21 +197,24 @@ public static class OpenFinanceTransactionMapper
         return Encoding.UTF8.GetString(stream.ToArray());
     }
 
-    private static string Normalize(string value)
+    /// <summary>The holder paying or receiving from itself (sweeps, own transfers) has no counterparty.</summary>
+    private static bool IsHolder(OpenFinanceAccount account, OpenFinanceParty? party) =>
+        account.HolderTaxId is { } holder && party?.TaxId is { } taxId && taxId.Value == holder.Value;
+
+    /// <summary>Upper-case ASCII words: "Resgate automático CDB" becomes {RESGATE, AUTOMATICO, CDB}.</summary>
+    private static HashSet<string> Words(string value)
     {
         var decomposed = value.Normalize(NormalizationForm.FormD);
-        var builder = new StringBuilder(decomposed.Length + 1);
+        var builder = new StringBuilder(decomposed.Length);
         foreach (var c in decomposed)
         {
-            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
-                builder.Append(char.ToUpperInvariant(c));
+            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark)
+                continue;
+            builder.Append(char.IsAsciiLetterOrDigit(c) ? char.ToUpperInvariant(c) : ' ');
         }
 
-        return builder.Append(' ').ToString();
+        return new HashSet<string>(builder.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries), StringComparer.Ordinal);
     }
-
-    private static bool ContainsAny(string text, params string[] words) =>
-        words.Any(w => text.Contains(w, StringComparison.Ordinal));
 
     private static void WriteOptional(Utf8JsonWriter writer, string name, string? value)
     {

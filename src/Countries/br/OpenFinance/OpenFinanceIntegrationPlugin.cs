@@ -70,7 +70,7 @@ public abstract class OpenFinanceIntegrationPlugin : IIntegrationPlugin, IIntegr
                 ProviderId, request.ConnectionId, ex.Kind, ex.Message);
             return IntegrationSyncResult.Failure(startedAt, _timeProvider.GetUtcNow(), ex.Kind, ex.Message);
         }
-        catch (InvalidOperationException ex)
+        catch (OpenFinanceIdentityException ex)
         {
             // An account without the bank identity the keys are built from: fail rather than guess one.
             _logger.LogWarning("{Provider} sync for connection {ConnectionId} received unusable data: {Reason}",

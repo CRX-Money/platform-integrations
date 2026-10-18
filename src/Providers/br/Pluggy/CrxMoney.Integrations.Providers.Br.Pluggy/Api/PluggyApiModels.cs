@@ -41,7 +41,8 @@ internal sealed record PluggyAccount(
     [property: JsonPropertyName("number")] string? Number,
     [property: JsonPropertyName("balance")] decimal? Balance,
     [property: JsonPropertyName("currencyCode")] string? CurrencyCode,
-    [property: JsonPropertyName("bankData")] PluggyBankData? BankData);
+    [property: JsonPropertyName("bankData")] PluggyBankData? BankData,
+    [property: JsonPropertyName("taxNumber")] string? TaxNumber = null);
 
 internal sealed record PluggyBankData([property: JsonPropertyName("transferNumber")] string? TransferNumber);
 

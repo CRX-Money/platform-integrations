@@ -40,7 +40,8 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   aggregator, Inter's own API or an OFX file land on the same account map.
 - **Idempotency** is built only from what the bank reports:
   `brof:` + SHA-256(account, instant to the second, credit/debit, amount,
-  counterparty CPF/CNPJ, ordinal among identical lines). The aggregator's id
+  ordinal among identical lines). Counterparty data is left out on purpose:
+  aggregators enrich it later and unevenly. The aggregator's id
   becomes the import's `ExternalId` and is kept in provider data, but never in the
   key. Switching aggregators on an existing connection therefore imports nothing
   twice. The recipe is part of the package's released behaviour (`docs/versioning.md`).
@@ -48,7 +49,8 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
 - **Provider data** (schemas `br.openfinance.transaction.deposit`/`.withdrawal` v1):
   `provider` (the aggregator), `channel: "openfinance"`, type and detail,
   description, `counterparty` (name, `taxId` + `taxIdKind` + `taxIdCountry`,
-  ISPB, branch, account), `pix` when present, `card` (last four, bill), a
+  ISPB, branch, account; replaced by `counterpartyIsHolder: true` when the other
+  side is the account holder itself, as in sweeps), `pix` when present, `card` (last four, bill), a
   `transferHint` (`investment` for automatic CDB sweeps and similar,
   `card_bill_payment`), and the aggregator's raw line as `sourcePayload`.
 - **Sync behaviour**: pending lines are never imported; sources read everything they
