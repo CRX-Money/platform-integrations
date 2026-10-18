@@ -1,0 +1,112 @@
+{
+  "results": [
+    {
+      "id": "00000000-0000-4000-8000-000000000c05",
+      "accountId": "00000000-0000-4000-8000-0000000000b1",
+      "date": "2026-09-20T10:00:00.000Z",
+      "description": "Resgate",
+      "descriptionRaw": "RESGATE CDB",
+      "amount": 5000,
+      "currencyCode": "BRL",
+      "type": "CREDIT",
+      "status": "POSTED",
+      "operationType": "OUTROS",
+      "operationTypeAdditionalInfo": "RES AUTOMATICO CDB LIQUIDEZ",
+      "order": 0,
+      "providerId": null,
+      "category": "Investments",
+      "paymentData": {
+        "payer": { "name": null, "documentNumber": { "type": "CNPJ", "value": "{{CNPJ:9}}" }, "routingNumberISPB": null, "branchNumber": null, "accountNumber": null },
+        "receiver": { "name": null, "documentNumber": { "type": "CNPJ", "value": "{{CNPJ:9}}" }, "routingNumberISPB": null, "branchNumber": null, "accountNumber": null },
+        "paymentMethod": "OTHER",
+        "referenceNumber": null
+      },
+      "merchant": null,
+      "creditCardMetadata": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000c06",
+      "accountId": "00000000-0000-4000-8000-0000000000b1",
+      "date": "2026-09-22T16:00:00.000Z",
+      "description": "DARF",
+      "descriptionRaw": "PAGAMENTO DARF",
+      "amount": -99.99,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": "OUTROS",
+      "operationTypeAdditionalInfo": "DARF",
+      "order": 0,
+      "providerId": null,
+      "category": "Taxes",
+      "paymentData": null,
+      "merchant": null,
+      "creditCardMetadata": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000c07",
+      "accountId": "00000000-0000-4000-8000-0000000000b1",
+      "date": "2026-09-25T18:30:15.000Z",
+      "description": "Pix enviado",
+      "descriptionRaw": "PIX ENVIADO",
+      "amount": -10,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": "PIX",
+      "operationTypeAdditionalInfo": null,
+      "order": 0,
+      "providerId": null,
+      "paymentData": {
+        "payer": null,
+        "receiver": { "name": null, "documentNumber": { "type": "CPF", "value": "{{CPF:2}}" }, "routingNumberISPB": null, "branchNumber": null, "accountNumber": null },
+        "paymentMethod": "PIX",
+        "referenceNumber": null
+      },
+      "merchant": null,
+      "creditCardMetadata": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000c08",
+      "accountId": "00000000-0000-4000-8000-0000000000b1",
+      "date": "2026-09-25T18:30:15.000Z",
+      "description": "Pix enviado",
+      "descriptionRaw": "PIX ENVIADO",
+      "amount": -10,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": "PIX",
+      "operationTypeAdditionalInfo": null,
+      "order": 1,
+      "providerId": null,
+      "paymentData": {
+        "payer": null,
+        "receiver": { "name": null, "documentNumber": { "type": "CPF", "value": "{{CPF:2}}" }, "routingNumberISPB": null, "branchNumber": null, "accountNumber": null },
+        "paymentMethod": "PIX",
+        "referenceNumber": null
+      },
+      "merchant": null,
+      "creditCardMetadata": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000c09",
+      "accountId": "00000000-0000-4000-8000-0000000000b1",
+      "date": "2026-10-10T12:00:00.000Z",
+      "description": "Pagamento fatura",
+      "descriptionRaw": "PAGAMENTO FATURA CARTAO",
+      "amount": -300,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": "BOLETO",
+      "operationTypeAdditionalInfo": null,
+      "order": 0,
+      "providerId": null,
+      "paymentData": null,
+      "merchant": null,
+      "creditCardMetadata": null
+    }
+  ],
+  "next": null
+}

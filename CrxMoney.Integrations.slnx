@@ -6,19 +6,33 @@
   <Folder Name="/src/Abstractions/">
     <Project Path="src/Abstractions/CrxMoney.Integrations.Abstractions/CrxMoney.Integrations.Abstractions.csproj" />
   </Folder>
+  <Folder Name="/src/Countries/" />
+  <Folder Name="/src/Countries/br/">
+    <Project Path="src/Countries/br/CrxMoney.Integrations.Countries.Br.csproj" />
+  </Folder>
   <Folder Name="/src/Providers/" />
   <Folder Name="/src/Providers/br/" />
   <Folder Name="/src/Providers/br/Inter/">
     <Project Path="src/Providers/br/Inter/CrxMoney.Integrations.Providers.Br.Inter/CrxMoney.Integrations.Providers.Br.Inter.csproj" />
   </Folder>
+  <Folder Name="/src/Providers/br/Pluggy/">
+    <Project Path="src/Providers/br/Pluggy/CrxMoney.Integrations.Providers.Br.Pluggy/CrxMoney.Integrations.Providers.Br.Pluggy.csproj" />
+  </Folder>
   <Folder Name="/tests/" />
   <Folder Name="/tests/Abstractions/">
     <Project Path="tests/Abstractions/CrxMoney.Integrations.Abstractions.Tests/CrxMoney.Integrations.Abstractions.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Countries/" />
+  <Folder Name="/tests/Countries/br/">
+    <Project Path="tests/Countries/br/CrxMoney.Integrations.Countries.Br.Tests/CrxMoney.Integrations.Countries.Br.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Providers/" />
   <Folder Name="/tests/Providers/br/" />
   <Folder Name="/tests/Providers/br/Inter/">
     <Project Path="tests/Providers/br/Inter/CrxMoney.Integrations.Providers.Br.Inter.Tests/CrxMoney.Integrations.Providers.Br.Inter.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Providers/br/Pluggy/">
+    <Project Path="tests/Providers/br/Pluggy/CrxMoney.Integrations.Providers.Br.Pluggy.Tests/CrxMoney.Integrations.Providers.Br.Pluggy.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Build/">
     <Project Path="tests/Build/CrxMoney.Integrations.FixtureGuard.Tests/CrxMoney.Integrations.FixtureGuard.Tests.csproj" />

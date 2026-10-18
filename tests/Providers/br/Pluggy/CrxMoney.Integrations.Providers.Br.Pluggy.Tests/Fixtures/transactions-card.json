@@ -1,0 +1,75 @@
+{
+  "results": [
+    {
+      "id": "00000000-0000-4000-8000-000000000d01",
+      "accountId": "00000000-0000-4000-8000-0000000000b2",
+      "date": "2026-09-03T03:00:00.000Z",
+      "description": "Servico Digital Exemplo",
+      "descriptionRaw": "SERVICO DIGITAL EXEMPLO",
+      "amount": 89.9,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": "PAGAMENTO",
+      "operationTypeAdditionalInfo": null,
+      "order": 0,
+      "providerId": null,
+      "paymentData": null,
+      "merchant": { "businessName": "Servico Digital Exemplo Ltda", "cnpj": "{{CNPJ:3}}", "cnae": "0000000" },
+      "creditCardMetadata": {
+        "cardNumber": "1234",
+        "billId": "00000000-0000-4000-8000-0000000000e1",
+        "billPostDate": "2026-09-03",
+        "paymentType": "SINGLE",
+        "transactionDateTime": "2026-09-03T03:00:00.000Z"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000d02",
+      "accountId": "00000000-0000-4000-8000-0000000000b2",
+      "date": "2026-10-10T03:00:00.000Z",
+      "description": "Pagamento recebido",
+      "descriptionRaw": "PAGAMENTO RECEBIDO",
+      "amount": -300,
+      "currencyCode": "BRL",
+      "type": "CREDIT",
+      "status": "POSTED",
+      "operationType": "PAGAMENTO",
+      "operationTypeAdditionalInfo": null,
+      "order": 0,
+      "providerId": null,
+      "paymentData": null,
+      "merchant": null,
+      "creditCardMetadata": {
+        "cardNumber": "1234",
+        "billId": "00000000-0000-4000-8000-0000000000e1",
+        "paymentType": "SINGLE",
+        "transactionDateTime": "2026-10-10T03:00:00.000Z"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000d03",
+      "accountId": "00000000-0000-4000-8000-0000000000b2",
+      "date": "2026-10-13T03:00:00.000Z",
+      "description": "Compra pendente",
+      "descriptionRaw": "LOJA EXEMPLO",
+      "amount": 42,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "PENDING",
+      "operationType": "PAGAMENTO",
+      "operationTypeAdditionalInfo": null,
+      "order": 0,
+      "providerId": null,
+      "paymentData": null,
+      "merchant": null,
+      "creditCardMetadata": {
+        "cardNumber": "1234",
+        "billId": null,
+        "paymentType": "SINGLE",
+        "transactionDateTime": "2026-10-13T03:00:00.000Z"
+      }
+    }
+  ],
+  "next": null
+}
