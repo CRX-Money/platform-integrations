@@ -55,7 +55,7 @@ boundary is what makes them safe to publish. The contract is documented in
 
 1. Open a [new provider request](../../issues/new?template=new-provider.yml) so
    maintainers can confirm the scope and the country folder.
-2. Create `src/Providers/<cc>/<Provider>/CrxMoney.Integrations.<Cc>.<Provider>.csproj`
+2. Create `src/Providers/<cc>/<Provider>/CrxMoney.Integrations.Providers.<Cc>.<Provider>.csproj`
    referencing the Abstractions project, and a matching test project under
    `tests/Providers/<cc>/<Provider>/`.
 3. Build fixtures from synthetic data only (see [`docs/fixture-policy.md`](docs/fixture-policy.md)).

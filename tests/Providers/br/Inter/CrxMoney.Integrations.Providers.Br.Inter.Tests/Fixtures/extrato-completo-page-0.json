@@ -1,0 +1,121 @@
+{
+  "totalPaginas": 2,
+  "totalElementos": 9,
+  "ultimaPagina": false,
+  "primeiraPagina": true,
+  "tamanhoPagina": 5,
+  "numeroDeElementos": 5,
+  "transacoes": [
+    {
+      "cpmf": "0.00",
+      "idTransacao": "SYNTH-TX-0001",
+      "dataInclusao": "2026-03-02 09:15:00",
+      "dataTransacao": "2026-03-02",
+      "tipoTransacao": "PIX",
+      "tipoOperacao": "C",
+      "valor": "1500.00",
+      "titulo": "Pix recebido",
+      "descricao": "PIX RECEBIDO - Cliente Exemplo Ltda",
+      "detalhes": {
+        "txId": "SYNTHTXID000001",
+        "nomePagador": "Cliente Exemplo Ltda",
+        "descricaoPix": "Fatura 0001",
+        "cpfCnpjPagador": "{{CNPJ:1}}",
+        "contaBancariaRecebedor": "12345678",
+        "nomeEmpresaPagador": "Banco Exemplo Pagador S.A.",
+        "tipoDetalhe": "COMPLETE",
+        "endToEndId": "E00000000202603020915SYNTH000001",
+        "chavePixRecebedor": "financeiro@empresa.example",
+        "nomeEmpresaRecebedor": "Banco Exemplo Recebedor S.A.",
+        "nomeRecebedor": "Empresa Exemplo Ltda",
+        "agenciaRecebedor": "0001",
+        "cpfCnpjRecebedor": "{{CNPJ:9}}",
+        "origemMovimentacao": "CHAVE",
+        "codigoSolicitacao": "00000000-0000-4000-8000-000000000011"
+      }
+    },
+    {
+      "cpmf": "0.00",
+      "idTransacao": "SYNTH-TX-0002",
+      "dataInclusao": "2026-03-03 11:40:12",
+      "dataTransacao": "2026-03-03",
+      "tipoTransacao": "PIX",
+      "tipoOperacao": "D",
+      "valor": "250.75",
+      "titulo": "Pix enviado",
+      "descricao": "PIX ENVIADO - Fulano de Tal",
+      "detalhes": {
+        "txId": "SYNTHTXID000002",
+        "nomePagador": "Empresa Exemplo Ltda",
+        "descricaoPix": "Reembolso",
+        "cpfCnpjPagador": "{{CNPJ:9}}",
+        "contaBancariaRecebedor": "23456789",
+        "nomeEmpresaPagador": "Banco Exemplo Pagador S.A.",
+        "tipoDetalhe": "COMPLETE",
+        "endToEndId": "E00000000202603031140SYNTH000002",
+        "chavePixRecebedor": "00000000-0000-4000-8000-000000000001",
+        "nomeEmpresaRecebedor": "Banco Exemplo Recebedor S.A.",
+        "nomeRecebedor": "Fulano de Tal",
+        "agenciaRecebedor": "0089",
+        "cpfCnpjRecebedor": "{{CPF:1}}",
+        "origemMovimentacao": "CHAVE",
+        "codigoSolicitacao": "00000000-0000-4000-8000-000000000012"
+      }
+    },
+    {
+      "cpmf": "0.00",
+      "idTransacao": "SYNTH-TX-0003",
+      "dataInclusao": "2026-03-05 16:02:44",
+      "dataTransacao": "2026-03-05",
+      "tipoTransacao": "TRANSFERENCIA",
+      "tipoOperacao": "C",
+      "valor": "3200.00",
+      "titulo": "TED recebida",
+      "descricao": "TED RECEBIDA - Beltrano de Souza",
+      "detalhes": {
+        "tipoDetalhe": "TRANSFERENCIA",
+        "nomeRemetente": "Beltrano de Souza",
+        "cpfCnpjRemetente": "{{CPF:2}}",
+        "bancoRemetente": "Banco Exemplo S.A.",
+        "agenciaRemetente": "1234",
+        "contaRemetente": "99999-9"
+      }
+    },
+    {
+      "cpmf": "0.00",
+      "idTransacao": "SYNTH-TX-0004",
+      "dataInclusao": "2026-03-10 08:00:00",
+      "dataTransacao": "2026-03-10",
+      "tipoTransacao": "PAGAMENTO",
+      "tipoOperacao": "D",
+      "valor": "189.90",
+      "titulo": "Pagamento efetuado",
+      "descricao": "PAGAMENTO DE TITULO - Concessionaria Exemplo",
+      "numeroDocumento": "0000123",
+      "detalhes": {
+        "tipoDetalhe": "PAGAMENTO",
+        "nomeBeneficiario": "Concessionaria Exemplo S.A.",
+        "cpfCnpjBeneficiario": "{{CNPJ:2}}",
+        "dataVencimento": "2026-03-10"
+      }
+    },
+    {
+      "cpmf": "0.00",
+      "idTransacao": "SYNTH-TX-0005",
+      "dataInclusao": "2026-03-12 14:30:00",
+      "dataTransacao": "2026-03-12",
+      "tipoTransacao": "BOLETO_COBRANCA",
+      "tipoOperacao": "C",
+      "valor": 980.5,
+      "titulo": "Boleto recebido",
+      "descricao": "RECEBIMENTO BOLETO - Cliente Exemplo Dois Ltda",
+      "detalhes": {
+        "tipoDetalhe": "BOLETO_COBRANCA",
+        "nossoNumero": "0000456",
+        "seuNumero": "FAT-0002",
+        "nomePagador": "Cliente Exemplo Dois Ltda",
+        "cpfCnpjPagador": "{{CNPJ:3}}"
+      }
+    }
+  ]
+}

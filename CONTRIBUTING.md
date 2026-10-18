@@ -22,8 +22,8 @@ By contributing you agree that your contribution is licensed under the
    lowercase ISO 3166-1 alpha-2 code of the country whose regulator licenses the
    provider (`br`, `py`), or `global` for providers that work the same way across
    countries. `<Provider>` is the provider's short name in PascalCase (`Inter`).
-2. **Create the project** `CrxMoney.Integrations.<Cc>.<Provider>.csproj`
-   (`CrxMoney.Integrations.Br.Inter`, `CrxMoney.Integrations.Global.Binance`),
+2. **Create the project** `CrxMoney.Integrations.Providers.<Cc>.<Provider>.csproj`
+   (`CrxMoney.Integrations.Providers.Br.Inter`, `CrxMoney.Integrations.Providers.Global.Binance`),
    referencing only `src/Abstractions/CrxMoney.Integrations.Abstractions`, shared
    helpers under `src/Countries/<cc>/` or `src/Formats/`, and well-maintained
    NuGet packages. Set `<IsPackable>true</IsPackable>` and a `README.md` packed
@@ -33,7 +33,7 @@ By contributing you agree that your contribution is licensed under the
    deterministic idempotency keys, checkpoints for incremental syncs,
    `IntegrationSyncResult.Failure` for expected provider errors, and no secrets
    or personal data in logs, error messages or diagnostics.
-4. **Write tests** in `tests/Providers/<cc>/<Provider>/CrxMoney.Integrations.<Cc>.<Provider>.Tests/`.
+4. **Write tests** in `tests/Providers/<cc>/<Provider>/CrxMoney.Integrations.Providers.<Cc>.<Provider>.Tests/`.
    CI refuses a provider change when that folder has no `*.Tests.csproj`.
 5. **Document** the provider in its `README.md`: what it imports, the API or file
    version it targets, required credentials and scopes (described, never
