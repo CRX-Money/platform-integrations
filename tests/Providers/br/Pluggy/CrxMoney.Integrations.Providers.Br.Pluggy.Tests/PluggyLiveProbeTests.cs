@@ -8,7 +8,8 @@ namespace CrxMoney.Integrations.Providers.Br.Pluggy.Tests;
 /// <summary>
 /// Opt-in check against a real Pluggy item, skipped unless <c>PLUGGY_CLIENT_ID</c>, <c>PLUGGY_CLIENT_SECRET</c>
 /// and <c>PLUGGY_ITEM_ID</c> are set (CI never sets them). It prints only aggregates (counts, key shapes,
-/// the balance check), never names, documents, amounts or descriptions.
+/// the deposit, card and position balance checks, position types, movement operations, pair counts), never names,
+/// documents, amounts or descriptions.
 /// </summary>
 [Trait("Category", "Live")]
 public sealed class PluggyLiveProbeTests
@@ -48,16 +49,27 @@ public sealed class PluggyLiveProbeTests
             result.ImportEvents.Where(e => DateOnly.FromDateTime(e.OccurredAtUtc.ToOffset(TimeSpan.FromHours(-3)).DateTime) >= sentFrom).Select(e => e.IdempotencyKey).Order(),
             windowed.ImportEvents.Select(e => e.IdempotencyKey).Order());
 
-        // On a full read, a deposit account's credits minus debits still equal the balance Pluggy reports.
-        var reconciles = JsonNode.Parse(result.ProviderDiagnosticsJson!)!["accounts"]!.AsArray()
-            .Where(a => a!["balance"] is not null)
-            .Select(a => result.ImportEvents
-                .Where(e => e.ExternalAccountId == a!["externalAccountId"]!.GetValue<string>())
-                .Sum(e => e.Type == "deposit" ? e.Amount!.Value : -e.Amount!.Value) == a!["balance"]!.GetValue<decimal>())
-            .ToList();
+        // On a full read, an account's events still add up to the balance reported: credits minus debits for a deposit
+        // account, debits minus credits (what is owed) for a card's settled balance. A position's events usually do not:
+        // fixed income accrues without movements, so its check is reported, not asserted.
+        var diagnostics = JsonNode.Parse(result.ProviderDiagnosticsJson!)!;
+        var rows = diagnostics["accounts"]!.AsArray().Select(a => a!).ToList();
+        decimal Net(JsonNode row) => result.ImportEvents
+            .Where(e => e.ExternalAccountId == row["externalAccountId"]!.GetValue<string>())
+            .Sum(e => e.Type == "deposit" ? e.Amount!.Value : -e.Amount!.Value);
+        string Kind(JsonNode row) => row["kind"]!.GetValue<string>();
+        bool Reconciles(JsonNode row) => (Kind(row) == "creditCard" ? -Net(row) : Net(row)) == row["balance"]!.GetValue<decimal>();
+        var reconciles = rows.Where(r => Kind(r) == "deposit" && r["balance"] is not null).Select(Reconciles).ToList();
+        var cardReconciles = rows.Where(r => Kind(r) == "creditCard" && r["balance"] is not null).Select(Reconciles).ToList();
+        var investmentRows = rows.Where(r => Kind(r) == "investment").ToList();
+
+        // Every investment event belongs to a reported position.
+        var positions = investmentRows.Select(r => r["externalAccountId"]!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
+        Assert.All(result.ImportEvents.Where(e => e.ExternalAccountId.Contains(":inv:", StringComparison.Ordinal)), e => Assert.Contains(e.ExternalAccountId, positions));
 
         var data = result.ImportEvents.Select(e => JsonNode.Parse(e.ProviderData!)!).ToList();
-        var accountShapes = result.ImportEvents.Select(e => System.Text.RegularExpressions.Regex.Replace(e.ExternalAccountId, "[0-9]", "9")).Distinct();
+        var investmentData = data.Where(d => d["accountKind"]?.GetValue<string>() == "investment").ToList();
+        var accountShapes = result.ImportEvents.Select(e => System.Text.RegularExpressions.Regex.Replace(e.ExternalAccountId, "[0-9A-Z]", "9")).Distinct();
         var message = string.Join(" | ",
             $"events={result.ImportEvents.Count}",
             $"accounts=[{string.Join(", ", accountShapes)}]",
@@ -65,9 +77,15 @@ public sealed class PluggyLiveProbeTests
             $"withdrawal={result.ImportEvents.Count(e => e.Type == "withdrawal")}",
             $"withTaxId={data.Count(d => d["counterparty"]?["taxId"] is not null)}",
             $"holderSide={data.Count(d => d["counterpartyIsHolder"] is not null)}",
-            $"hints=[{string.Join(", ", data.GroupBy(d => d["transferHint"]?.GetValue<string>() ?? "none").Select(g => $"{g.Key}:{g.Count()}"))}]",
+            $"hints=[{string.Join(", ", data.GroupBy(d => $"{d["accountKind"]}:{d["transferHint"]?.GetValue<string>() ?? "none"}").OrderBy(g => g.Key, StringComparer.Ordinal).Select(g => $"{g.Key}:{g.Count()}"))}]",
             $"windowed={windowed.ImportEvents.Count} sentFrom={sentFrom:yyyy-MM-dd}",
             $"depositBalanceMatchesFullNet=[{string.Join(", ", reconciles)}]",
+            $"cardSettledMatchesFullNet=[{string.Join(", ", cardReconciles)}]",
+            $"cards=[{string.Join(", ", rows.Where(r => Kind(r) == "creditCard").Select(r => $"pendingLines:{r["pendingLines"]?.GetValue<int>()} limit:{r["creditLimit"] is not null} due:{r["billDueDate"] is not null}"))}]",
+            $"positions={investmentRows.Count} [{string.Join(", ", investmentRows.GroupBy(r => $"{r["type"]}/{r["subtype"]}/{r["externalAccountIdBasis"]}/{r["status"]}").OrderBy(g => g.Key, StringComparer.Ordinal).Select(g => $"{g.Key}:{g.Count()}"))}]",
+            $"positionBalanceMatchesFullNet=[{string.Join(", ", investmentRows.Select(Reconciles))}]",
+            $"movements=[{string.Join(", ", investmentData.GroupBy(d => $"{d["operation"]}{(d["component"] is { } c ? "#" + c : string.Empty)}").OrderBy(g => g.Key, StringComparer.Ordinal).Select(g => $"{g.Key}:{g.Count()}"))}]",
+            $"pairs={diagnostics["transferPairs"]?.ToJsonString()}",
             $"diagnostics={Redact(result.ProviderDiagnosticsJson)}",
             $"windowedDiagnostics={Redact(windowed.ProviderDiagnosticsJson)}");
         TestContext.Current.SendDiagnosticMessage(message);
@@ -76,9 +94,14 @@ public sealed class PluggyLiveProbeTests
             await File.WriteAllTextAsync(outPath, message, ct);
     }
 
-    /// <summary>Dates, account ids and balances are replaced by markers; counts and statuses stay.</summary>
+    /// <summary>
+    /// Dates, account ids, names, issuers, balances, limits and every other amount are replaced by markers;
+    /// counts, kinds, types, statuses and identity bases stay.
+    /// </summary>
     private static string Redact(string? diagnostics) => diagnostics is null
         ? "none"
         : System.Text.RegularExpressions.Regex.Replace(diagnostics,
-            "\"(lastUpdatedAtUtc|credentialExpiresAtUtc|balanceAtUtc|externalAccountId|balance)\":(\"[^\"]*\"|-?[0-9.]+)", "\"$1\":\"<set>\"");
+            "\"(lastUpdatedAtUtc|credentialExpiresAtUtc|balanceAtUtc|externalAccountId|balance|pendingAmount|balanceWithPending|creditLimit"
+            + "|availableCreditLimit|minimumPayment|billCloseDate|billDueDate|name|issuer|grossAmount|amountInvested|profit|incomeTax"
+            + "|financialTax|issueDate|dueDate|transactionsDateFrom|cardTransactionsDateFrom|sentFrom)\":(\"[^\"]*\"|-?[0-9.]+)", "\"$1\":\"<set>\"");
 }

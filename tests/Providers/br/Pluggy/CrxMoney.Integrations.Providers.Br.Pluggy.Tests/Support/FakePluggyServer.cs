@@ -7,6 +7,7 @@ using System.Web;
 using CrxMoney.Integrations.Abstractions.Plugins;
 using CrxMoney.Integrations.Abstractions.Sync;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 
 namespace CrxMoney.Integrations.Providers.Br.Pluggy.Tests.Support;
 
@@ -27,13 +28,25 @@ internal sealed class FakePluggyServer : HttpMessageHandler
     public const string CardAccountId = "00000000-0000-4000-8000-0000000000b2";
 
     private static readonly string[] TransactionQueryNames = ["accountId", "ids", "dateFrom", "dateTo", "createdAtFrom", "after"];
+    private static readonly string[] InvestmentQueryNames = ["itemId", "type", "page", "pageSize"];
+    private static readonly string[] InvestmentTransactionQueryNames = ["page", "pageSize"];
 
     private readonly ConcurrentQueue<RecordedRequest> _requests = new();
     private readonly Dictionary<string, Func<RecordedRequest, int, HttpResponseMessage>> _routes = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _calls = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, (string Query, int Offset)> _cursors = new(StringComparer.Ordinal);
 
-    private FakePluggyServer() => On("/v2/transactions", (request, _) => Transactions(request));
+    private FakePluggyServer()
+    {
+        On("/v2/transactions", (request, _) => Transactions(request));
+        On("/investments", (request, _) => Investments(request));
+        foreach (var investmentId in InvestmentIds)
+            On($"/investments/{investmentId}/transactions", (request, _) => InvestmentTransactions(request, investmentId));
+    }
+
+    /// <summary>The positions of <c>investments.json</c>, each with a <c>/investments/{id}/transactions</c> route.</summary>
+    public static readonly string[] InvestmentIds =
+        ["00000000-0000-4000-8000-0000000000f1", "00000000-0000-4000-8000-0000000000f2", "00000000-0000-4000-8000-0000000000f3"];
 
     public IReadOnlyList<RecordedRequest> Requests => [.. _requests];
 
@@ -44,6 +57,9 @@ internal sealed class FakePluggyServer : HttpMessageHandler
 
     /// <summary>Lines per <c>/v2/transactions</c> page; Pluggy's default is 500.</summary>
     public int TransactionPageSize { get; set; } = 500;
+
+    /// <summary>Results per <c>/investments</c> and <c>/investments/{id}/transactions</c> page when the client sends no <c>pageSize</c>; Pluggy's default is 500.</summary>
+    public int InvestmentPageSize { get; set; } = 500;
 
     public static FakePluggyServer WithFixtures() => new FakePluggyServer()
         .On("/auth", (_, call) => Json($$"""{"apiKey":"synthetic-api-key-{{call}}"}"""))
@@ -109,6 +125,51 @@ internal sealed class FakePluggyServer : HttpMessageHandler
         return Json(page.ToJsonString());
     }
 
+    /// <summary><c>GET /investments?itemId=</c> as documented: optional <c>type</c>, page-number paging (<c>page</c> from 1).</summary>
+    private HttpResponseMessage Investments(RecordedRequest request)
+    {
+        if (request.QueryNames().FirstOrDefault(n => !InvestmentQueryNames.Contains(n, StringComparer.Ordinal)) is { } unknown)
+            return Error(HttpStatusCode.BadRequest, $"Unknown query parameter '{unknown}'");
+        if (request.Query("itemId") != ItemId)
+            return Error(HttpStatusCode.BadRequest, "itemId is required and must be an item of this application");
+
+        var results = JsonNode.Parse(Fixtures.Text("investments.json"))!["results"]!.AsArray()
+            .Where(i => request.Query("type") is not { } type || i!["type"]!.GetValue<string>() == type)
+            .ToList();
+        return NumberedPage(request, results);
+    }
+
+    /// <summary>
+    /// <c>GET /investments/{id}/transactions</c>, page-number paging. <c>investment-transactions.json</c> holds each
+    /// position's movements by id; the server wraps them in Pluggy's envelope (<c>total</c>, <c>totalPages</c>, <c>page</c>, <c>results</c>).
+    /// </summary>
+    private HttpResponseMessage InvestmentTransactions(RecordedRequest request, string investmentId)
+    {
+        if (request.QueryNames().FirstOrDefault(n => !InvestmentTransactionQueryNames.Contains(n, StringComparer.Ordinal)) is { } unknown)
+            return Error(HttpStatusCode.BadRequest, $"Unknown query parameter '{unknown}'");
+        var results = JsonNode.Parse(Fixtures.Text("investment-transactions.json"))![investmentId]?.AsArray().ToList() ?? [];
+        return NumberedPage(request, results);
+    }
+
+    private HttpResponseMessage NumberedPage(RecordedRequest request, IReadOnlyList<JsonNode?> results)
+    {
+        var page = 1;
+        var pageSize = InvestmentPageSize;
+        if (request.Query("page") is { } pageText && (!int.TryParse(pageText, CultureInfo.InvariantCulture, out page) || page < 1))
+            return Error(HttpStatusCode.BadRequest, "page must be a positive number");
+        if (request.Query("pageSize") is { } sizeText && (!int.TryParse(sizeText, CultureInfo.InvariantCulture, out pageSize) || pageSize is < 1 or > 500))
+            return Error(HttpStatusCode.BadRequest, "pageSize must be between 1 and 500");
+
+        var envelope = new JsonObject
+        {
+            ["total"] = results.Count,
+            ["totalPages"] = (results.Count + pageSize - 1) / pageSize,
+            ["page"] = page,
+            ["results"] = new JsonArray([.. results.Skip((page - 1) * pageSize).Take(pageSize).Select(r => r!.DeepClone())]),
+        };
+        return Json(envelope.ToJsonString());
+    }
+
     private static bool TryDate(string? value, out DateOnly? date)
     {
         date = null;
@@ -158,11 +219,13 @@ internal sealed class PluggyTestHost : IDisposable
     private readonly ServiceProvider _services;
     private readonly IServiceScope _scope;
 
+    /// <summary>"Now" in the tests unless one passes its own clock: the day after the fixtures' last refresh.</summary>
+    public static readonly DateTimeOffset Now = new(2026, 10, 14, 12, 0, 0, TimeSpan.Zero);
+
     public PluggyTestHost(FakePluggyServer server, TimeProvider? timeProvider = null)
     {
         var services = new ServiceCollection();
-        if (timeProvider is not null)
-            services.AddSingleton(timeProvider);
+        services.AddSingleton(timeProvider ?? new FakeTimeProvider(Now));
         services.AddPluggyIntegration();
         services.AddHttpClient<Api.PluggyApiClient>().ConfigurePrimaryHttpMessageHandler(() => new NonDisposingHandler(server));
         _services = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });

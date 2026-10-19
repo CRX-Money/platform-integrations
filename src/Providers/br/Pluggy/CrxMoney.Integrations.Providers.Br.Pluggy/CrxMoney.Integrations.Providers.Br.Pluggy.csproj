@@ -3,7 +3,7 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>CrxMoney.Integrations.Providers.Br.Pluggy</PackageId>
-    <Description>CRX•Money Platform integration for Pluggy, a Brazilian Open Finance aggregator: reads connected bank accounts and cards through the Pluggy API and hands them to the aggregator-neutral Open Finance model in CrxMoney.Integrations.Countries.Br.</Description>
+    <Description>CRX•Money Platform integration for Pluggy, a Brazilian Open Finance aggregator: reads connected bank accounts, cards and investments through the Pluggy API and hands them to the aggregator-neutral Open Finance model in CrxMoney.Integrations.Countries.Br.</Description>
     <PackageTags>$(PackageTags);brazil;open-finance;pluggy</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>

@@ -60,6 +60,9 @@ internal sealed class PluggyApiKeyCache(TimeProvider timeProvider)
 /// <summary>The lines of one account and the number of pages they took.</summary>
 internal sealed record PluggyTransactionsRead(IReadOnlyList<JsonElement> Lines, int Pages);
 
+/// <summary>Everything a page-numbered listing returned and the number of pages it took.</summary>
+internal sealed record PluggyNumberedRead(IReadOnlyList<JsonElement> Results, int Pages);
+
 /// <summary>Typed client for the Pluggy API. Failures become <see cref="OpenFinanceSourceException"/> with safe messages.</summary>
 internal sealed class PluggyApiClient(HttpClient httpClient, PluggyApiKeyCache apiKeys)
 {
@@ -100,6 +103,40 @@ internal sealed class PluggyApiClient(HttpClient httpClient, PluggyApiKeyCache a
             after = AfterCursor(page.Next);
             if (!seenCursors.Add(after))
                 throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, "Pluggy returned the same transactions cursor twice.");
+        }
+    }
+
+    /// <summary>
+    /// Walks <c>GET /investments?itemId=</c> by page number (500 per page, Pluggy's default). The listing has no date
+    /// filter: every position, open or fully withdrawn, is returned.
+    /// </summary>
+    public Task<PluggyNumberedRead> GetInvestmentsAsync(PluggyCredentials credentials, Guid itemId, CancellationToken cancellationToken) =>
+        GetNumberedAsync(credentials, page => $"investments?itemId={itemId:D}&page={page}", "investments", cancellationToken);
+
+    /// <summary>
+    /// Walks <c>GET /investments/{id}/transactions</c> by page number. Pluggy documents no date filter for it, so
+    /// every movement is read and the shared plugin applies the sync window.
+    /// </summary>
+    public Task<PluggyNumberedRead> GetInvestmentTransactionsAsync(PluggyCredentials credentials, string investmentId, CancellationToken cancellationToken) =>
+        GetNumberedAsync(credentials, page => $"investments/{Uri.EscapeDataString(investmentId)}/transactions?page={page}", "investment transactions", cancellationToken);
+
+    /// <summary>Follows <c>page</c> from 1 to <c>totalPages</c>; an empty page ends the walk early.</summary>
+    private async Task<PluggyNumberedRead> GetNumberedAsync(PluggyCredentials credentials, Func<int, string> path, string what, CancellationToken cancellationToken)
+    {
+        var results = new List<JsonElement>();
+        for (var page = 1; ; page++)
+        {
+            if (page > MaxPages)
+                throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy returned more than {MaxPages} {what} pages.");
+
+            var response = await GetAsync(credentials, path(page), PluggyJsonContext.Default.PluggyNumberedPage, what, cancellationToken).ConfigureAwait(false);
+            var pageResults = response.Results ?? [];
+            foreach (var result in pageResults)
+                results.Add(result.Clone());
+
+            var totalPages = response.TotalPages is { } total && total >= 1 ? (int)Math.Min(total, MaxPages + 1) : 1;
+            if (pageResults.Count == 0 || page >= totalPages)
+                return new PluggyNumberedRead(results, page);
         }
     }
 

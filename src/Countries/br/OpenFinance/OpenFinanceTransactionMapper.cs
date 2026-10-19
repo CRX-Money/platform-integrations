@@ -54,7 +54,15 @@ public static class OpenFinanceTransactionMapper
 
     /// <summary>Maps one posted line. <paramref name="ordinal"/> comes from <see cref="AssignOrdinals"/>.</summary>
     /// <exception cref="InvalidOperationException">The line is pending or the account has no bank identity.</exception>
-    public static IntegrationImportEvent Map(OpenFinanceAccount account, OpenFinanceTransaction transaction, int ordinal, string sourceName)
+    public static IntegrationImportEvent Map(OpenFinanceAccount account, OpenFinanceTransaction transaction, int ordinal, string sourceName) =>
+        Map(account, transaction, ordinal, sourceName, links: null);
+
+    /// <summary>
+    /// Maps one posted line with what the plugin found on the other side of a transfer-like line (<paramref name="links"/>).
+    /// Links only add provider data; the key is the same as without them.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The line is pending or the account has no bank identity.</exception>
+    public static IntegrationImportEvent Map(OpenFinanceAccount account, OpenFinanceTransaction transaction, int ordinal, string sourceName, OpenFinanceLineLinks? links)
     {
         if (transaction.IsPending)
             throw new InvalidOperationException("Pending lines are not imported.");
@@ -72,7 +80,7 @@ public static class OpenFinanceTransactionMapper
             Amount: transaction.Amount,
             FeeAmount: null,
             FeeAssetCode: null,
-            ProviderData: BuildProviderData(account, transaction, sourceName),
+            ProviderData: BuildProviderData(account, transaction, sourceName, links),
             ProviderDataSchemaId: isCredit ? OpenFinanceImportSchemas.DepositSchemaId : OpenFinanceImportSchemas.WithdrawalSchemaId,
             ProviderDataSchemaVersion: OpenFinanceImportSchemas.Version1);
     }
@@ -121,11 +129,28 @@ public static class OpenFinanceTransactionMapper
         return null;
     }
 
+    /// <summary>The investment product a sweep line names (<c>CDB</c>, <c>LCI</c>, <c>LCA</c>, <c>POUPANCA</c>), if any.</summary>
+    public static string? InvestmentProduct(OpenFinanceTransaction transaction)
+    {
+        var words = Words($"{transaction.TypeDetail} {transaction.Description}");
+        return InvestmentProducts.Order(StringComparer.Ordinal).FirstOrDefault(words.Contains);
+    }
+
+    /// <summary>Writes the <c>pair</c> object: the other side of a transfer-like movement found by the plugin.</summary>
+    internal static void WritePair(Utf8JsonWriter writer, OpenFinancePair pair)
+    {
+        writer.WriteStartObject("pair");
+        writer.WriteString("externalAccountId", pair.ExternalAccountId);
+        writer.WriteString("idempotencyKey", pair.IdempotencyKey);
+        writer.WriteString("basis", pair.Basis);
+        writer.WriteEndObject();
+    }
+
     private static readonly HashSet<string> CardPaymentWords = new(StringComparer.Ordinal) { "PAGAMENTO", "PAGTO", "FATURA" };
     private static readonly HashSet<string> InvestmentProducts = new(StringComparer.Ordinal) { "CDB", "LCI", "LCA", "POUPANCA" };
     private static readonly HashSet<string> InvestmentMovements = new(StringComparer.Ordinal) { "APLICACAO", "RESGATE" };
 
-    private static string BuildProviderData(OpenFinanceAccount account, OpenFinanceTransaction transaction, string sourceName)
+    private static string BuildProviderData(OpenFinanceAccount account, OpenFinanceTransaction transaction, string sourceName, OpenFinanceLineLinks? links)
     {
         var isCredit = transaction.Direction == OpenFinanceDirection.Credit;
         using var stream = new MemoryStream();
@@ -144,7 +169,8 @@ public static class OpenFinanceTransactionMapper
             WriteOptional(writer, "typeDetail", transaction.TypeDetail);
             WriteOptional(writer, "description", transaction.Description);
 
-            if (TransferHint(account, transaction) is { } hint)
+            var hint = TransferHint(account, transaction);
+            if (hint is not null)
                 writer.WriteString("transferHint", hint);
 
             if (account.Kind == OpenFinanceAccountKind.CreditCard)
@@ -152,8 +178,39 @@ public static class OpenFinanceTransactionMapper
                 writer.WriteStartObject("card");
                 WriteOptional(writer, "last4", account.CardLast4);
                 WriteOptional(writer, "billId", transaction.CardBillId);
+                WriteOptional(writer, "issuerCompe", account.IssuerCompe);
                 writer.WriteEndObject();
             }
+            else if (links?.PaidCard is { } paid)
+            {
+                // The checking side of a card bill payment: the card it paid, from the paired card line.
+                writer.WriteStartObject("card");
+                writer.WriteString("last4", paid.CardLast4);
+                WriteOptional(writer, "billId", paid.BillId);
+                writer.WriteString("issuerCompe", paid.IssuerCompe);
+                writer.WriteString("externalAccountId", BrazilianBankAccount.CardExternalAccountId(paid.IssuerCompe, paid.CardLast4));
+                writer.WriteEndObject();
+            }
+
+            if (hint == InvestmentHint && account.Kind == OpenFinanceAccountKind.Deposit)
+            {
+                writer.WriteStartObject("investment");
+                if (InvestmentProduct(transaction) is { } product)
+                    writer.WriteString("product", product);
+                if (links?.Investment is { } position)
+                {
+                    writer.WriteString("externalAccountId", position.ExternalAccountId);
+                    writer.WriteString("externalAccountIdBasis", position.IdentityBasis);
+                    writer.WriteString("type", position.Type);
+                    WriteOptional(writer, "subtype", position.Subtype);
+                    WriteOptional(writer, "name", position.Name);
+                }
+
+                writer.WriteEndObject();
+            }
+
+            if (links?.Pair is { } pair)
+                WritePair(writer, pair);
 
             if (IsHolder(account, transaction.Counterparty))
             {
@@ -232,6 +289,12 @@ public static class OpenFinanceImportSchemas
     /// <summary>Schema of money-out lines.</summary>
     public const string WithdrawalSchemaId = "br.openfinance.transaction.withdrawal";
 
+    /// <summary>Schema of money into an investment position (applications, income, transfers in).</summary>
+    public const string InvestmentDepositSchemaId = "br.openfinance.investment.deposit";
+
+    /// <summary>Schema of money out of an investment position (redemptions, taxes, fees, payouts, transfers out).</summary>
+    public const string InvestmentWithdrawalSchemaId = "br.openfinance.investment.withdrawal";
+
     /// <summary>Current schema version.</summary>
     public const short Version1 = 1;
 
@@ -242,7 +305,15 @@ public static class OpenFinanceImportSchemas
             "Money in on a Brazilian account or card, read through Open Finance.", JsonSchemaFor("fiat.deposit")),
         new IntegrationImportSchemaManifestItem(WithdrawalSchemaId, Version1, "Open Finance debit",
             "Money out of a Brazilian account or card, read through Open Finance.", JsonSchemaFor("fiat.withdrawal")),
+        new IntegrationImportSchemaManifestItem(InvestmentDepositSchemaId, Version1, "Open Finance investment in",
+            "Money into a Brazilian investment position (application, income, transfer in), read through Open Finance.", InvestmentJsonSchemaFor("investment.deposit")),
+        new IntegrationImportSchemaManifestItem(InvestmentWithdrawalSchemaId, Version1, "Open Finance investment out",
+            "Money out of a Brazilian investment position (redemption, tax, fee, payout, transfer out), read through Open Finance.", InvestmentJsonSchemaFor("investment.withdrawal")),
     ]);
+
+    private const string PairSchema = """
+        { "type": "object", "description": "The other side of a transfer-like movement, matched by amount and date", "required": ["externalAccountId", "idempotencyKey", "basis"], "properties": { "externalAccountId": { "type": "string" }, "idempotencyKey": { "type": "string" }, "basis": { "const": "amountAndDate" } } }
+        """;
 
     private static string JsonSchemaFor(string kind) => $$"""
         {
@@ -262,7 +333,29 @@ public static class OpenFinanceImportSchemas
             "typeDetail": { "type": "string" },
             "description": { "type": "string" },
             "transferHint": { "enum": ["investment", "card_bill_payment"] },
-            "card": { "type": "object", "properties": { "last4": { "type": "string" }, "billId": { "type": "string" } } },
+            "card": {
+              "type": "object",
+              "description": "On card lines: the card itself. On a checking-side card bill payment: the card it paid, when paired",
+              "properties": {
+                "last4": { "type": "string" },
+                "billId": { "type": "string" },
+                "issuerCompe": { "type": "string", "description": "COMPE code of the issuer" },
+                "externalAccountId": { "type": "string", "description": "The paid card's account (checking side only)" }
+              }
+            },
+            "investment": {
+              "type": "object",
+              "description": "On a checking-side investment sweep: the product it names and, when paired, the position",
+              "properties": {
+                "product": { "type": "string", "description": "CDB, LCA, LCI, POUPANCA" },
+                "externalAccountId": { "type": "string" },
+                "externalAccountIdBasis": { "type": "string" },
+                "type": { "type": "string" },
+                "subtype": { "type": "string" },
+                "name": { "type": "string" }
+              }
+            },
+            "pair": {{PairSchema}},
             "counterparty": {
               "type": "object",
               "properties": {
@@ -277,6 +370,51 @@ public static class OpenFinanceImportSchemas
             },
             "pix": { "type": "object", "properties": { "endToEndId": { "type": "string" }, "txId": { "type": "string" }, "key": { "type": "string" } } },
             "sourcePayload": { "description": "The aggregator's raw line, verbatim" }
+          }
+        }
+        """;
+
+    private static string InvestmentJsonSchemaFor(string kind) => $$"""
+        {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "required": ["provider", "channel", "kind", "status", "sourceMovementId", "sourceInvestmentId", "movementTime", "movementDate", "accountKind", "operation", "grossAmount", "investment"],
+          "properties": {
+            "provider": { "type": "string", "description": "The aggregator or channel the movement was read through" },
+            "channel": { "const": "openfinance" },
+            "kind": { "const": "{{kind}}" },
+            "status": { "const": "posted" },
+            "sourceMovementId": { "type": "string", "description": "The aggregator's own movement id (the import ExternalId, with #component for components)" },
+            "sourceInvestmentId": { "type": "string", "description": "The aggregator's own position id" },
+            "movementTime": { "type": "string", "format": "date-time" },
+            "movementDate": { "type": "string", "format": "date", "description": "Booking date, Brazilian calendar" },
+            "settlementTime": { "type": "string", "format": "date-time" },
+            "accountKind": { "const": "investment" },
+            "operation": { "enum": ["application", "redemption", "amortization", "income", "tax", "transferIn", "transferOut"] },
+            "component": { "enum": ["incomeTax", "iof", "fee", "payout"], "description": "Absent on the movement's main event" },
+            "parentIdempotencyKey": { "type": "string", "description": "The main event of a component" },
+            "taxKind": { "enum": ["incomeTax", "iof", "tax"], "description": "On a tax line" },
+            "grossAmount": { "type": "number" },
+            "cashAmount": { "type": "number", "description": "What moved between the position and the holder's cash" },
+            "expenses": { "type": "object", "properties": { "incomeTax": { "type": "number" }, "iof": { "type": "number" }, "fees": { "type": "number" } } },
+            "reportedNetAmount": { "type": "number", "description": "The source's own net amount, for reference" },
+            "description": { "type": "string" },
+            "investment": {
+              "type": "object",
+              "required": ["externalAccountIdBasis", "type"],
+              "properties": {
+                "externalAccountIdBasis": { "type": "string", "description": "number, isin, code, or the source name" },
+                "type": { "type": "string", "description": "FIXED_INCOME, MUTUAL_FUND, EQUITY, ETF, SECURITY, COE, OTHER" },
+                "subtype": { "type": "string", "description": "CDB, LCI, LCA, TREASURY, STOCK, ..." },
+                "name": { "type": "string" },
+                "issuer": { "type": "string" },
+                "issuerTaxId": { "type": "string" },
+                "isin": { "type": "string" }
+              }
+            },
+            "transferHint": { "const": "investment", "description": "On the event that moved cash" },
+            "pair": {{PairSchema}},
+            "sourcePayload": { "description": "The aggregator's raw movement, verbatim (main event only)" }
           }
         }
         """;

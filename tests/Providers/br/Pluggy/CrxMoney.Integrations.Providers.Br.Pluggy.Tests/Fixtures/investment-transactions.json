@@ -1,0 +1,119 @@
+{
+  "00000000-0000-4000-8000-0000000000f1": [
+    {
+      "id": "00000000-0000-4000-8000-000000000a01",
+      "type": "BUY",
+      "movementType": "CREDIT",
+      "description": "APLICACAO CDB",
+      "quantity": null,
+      "value": null,
+      "amount": 5000,
+      "netAmount": 5000,
+      "date": "2026-09-05T03:00:00.000Z",
+      "tradeDate": "2026-09-05T03:00:00.000Z",
+      "agreedRate": null,
+      "brokerageNumber": null,
+      "expenses": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000a02",
+      "type": "SELL",
+      "movementType": "DEBIT",
+      "description": "RESGATE CDB",
+      "quantity": null,
+      "value": null,
+      "amount": 5012.5,
+      "netAmount": 5000,
+      "date": "2026-09-20T03:00:00.000Z",
+      "tradeDate": "2026-09-20T03:00:00.000Z",
+      "agreedRate": null,
+      "brokerageNumber": null,
+      "expenses": { "incomeTax": 10, "iof": 2.5, "serviceTax": 0, "brokerageFee": 0, "other": 0, "iofProvision": 0 }
+    }
+  ],
+  "00000000-0000-4000-8000-0000000000f2": [
+    {
+      "id": "00000000-0000-4000-8000-000000000a03",
+      "type": "BUY",
+      "movementType": "CREDIT",
+      "description": "APLICACAO FUNDO",
+      "amount": 2000,
+      "netAmount": null,
+      "date": "2026-10-01T03:00:00.000Z",
+      "tradeDate": "2026-10-02T03:00:00.000Z",
+      "expenses": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000a04",
+      "type": "INTEREST",
+      "movementType": "CREDIT",
+      "description": "RENDIMENTO",
+      "amount": 15,
+      "netAmount": null,
+      "date": "2026-10-08T03:00:00.000Z",
+      "tradeDate": null,
+      "expenses": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000a05",
+      "type": "TAX",
+      "movementType": "DEBIT",
+      "description": "IR COME-COTAS",
+      "amount": 3,
+      "netAmount": null,
+      "date": "2026-10-08T03:00:00.000Z",
+      "tradeDate": null,
+      "expenses": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000a06",
+      "type": "TAX",
+      "movementType": "DEBIT",
+      "description": "IR COME-COTAS",
+      "amount": 3,
+      "netAmount": null,
+      "date": "2026-10-08T03:00:00.000Z",
+      "tradeDate": null,
+      "expenses": null
+    }
+  ],
+  "00000000-0000-4000-8000-0000000000f3": [
+    {
+      "id": "00000000-0000-4000-8000-000000000a07",
+      "type": "BUY",
+      "movementType": "CREDIT",
+      "description": null,
+      "quantity": 20,
+      "value": 24,
+      "amount": 480,
+      "netAmount": 483,
+      "date": "2026-10-02T03:00:00.000Z",
+      "tradeDate": "2026-10-02T03:00:00.000Z",
+      "brokerageNumber": "0001",
+      "expenses": { "serviceTax": 0, "brokerageFee": 2.5, "incomeTax": 0, "settlementFee": 0.25, "stockExchangeFee": 0.25, "other": 0, "iof": 0 }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000a08",
+      "type": "INTEREST",
+      "movementType": "DEBIT",
+      "description": "DIVIDENDOS",
+      "amount": 4,
+      "netAmount": null,
+      "date": "2026-10-09T03:00:00.000Z",
+      "tradeDate": null,
+      "expenses": null
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000a09",
+      "type": "TRANSFER",
+      "movementType": "DEBIT",
+      "description": "TRANSFERENCIA DE CUSTODIA",
+      "quantity": 0,
+      "amount": null,
+      "netAmount": null,
+      "date": "2026-10-10T03:00:00.000Z",
+      "tradeDate": null,
+      "expenses": null
+    }
+  ]
+}

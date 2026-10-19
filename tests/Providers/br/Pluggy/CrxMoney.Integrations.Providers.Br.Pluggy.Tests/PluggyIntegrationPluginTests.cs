@@ -27,7 +27,8 @@ public sealed class PluggyIntegrationPluginTests
         Assert.Equal("Pluggy", host.Plugin.ProviderId);
         Assert.Equal(IntegrationCapability.Transfers, host.Plugin.Capabilities);
         Assert.Equal(
-            [OpenFinanceImportSchemas.DepositSchemaId, OpenFinanceImportSchemas.WithdrawalSchemaId],
+            [OpenFinanceImportSchemas.DepositSchemaId, OpenFinanceImportSchemas.WithdrawalSchemaId,
+             OpenFinanceImportSchemas.InvestmentDepositSchemaId, OpenFinanceImportSchemas.InvestmentWithdrawalSchemaId],
             host.Plugin.GetImportSchemaManifest().Schemas.Select(s => s.SchemaId));
     }
 
@@ -60,7 +61,7 @@ public sealed class PluggyIntegrationPluginTests
     }
 
     [Fact]
-    public async Task The_provider_summary_reports_the_deposit_balance_and_its_date_per_account()
+    public async Task The_provider_summary_reports_the_deposit_balance_and_the_settled_card_balance_per_account()
     {
         using var host = new PluggyTestHost(FakePluggyServer.WithFixtures());
 
@@ -77,11 +78,27 @@ public sealed class PluggyIntegrationPluginTests
 
         var card = accounts.Single(a => a!["kind"]!.GetValue<string>() == "creditCard")!;
         Assert.Equal(CardAccountKey, card["externalAccountId"]!.GetValue<string>());
-        Assert.Null(card["balance"]);
-        Assert.Null(card["balanceAtUtc"]);
+        // Pluggy's 131.90 is the used limit: the posted balance plus the pending purchase of 42.00 (d03).
+        Assert.Equal(89.9m, card["balance"]!.GetValue<decimal>());
+        Assert.Equal(42m, card["pendingAmount"]!.GetValue<decimal>());
+        Assert.Equal(1, card["pendingLines"]!.GetValue<int>());
+        Assert.Equal(131.9m, card["balanceWithPending"]!.GetValue<decimal>());
+        Assert.Equal("liability", card["balanceSide"]!.GetValue<string>());
+        Assert.Equal("2026-10-13T09:00:00+00:00", card["balanceAtUtc"]!.GetValue<string>());
+        Assert.Equal(5000m, card["creditLimit"]!.GetValue<decimal>());
+        Assert.Equal(4868.1m, card["availableCreditLimit"]!.GetValue<decimal>());
+        Assert.Equal(13.19m, card["minimumPayment"]!.GetValue<decimal>());
+        Assert.Equal("2026-10-13", card["billCloseDate"]!.GetValue<string>());
+        Assert.Equal("2026-10-20", card["billDueDate"]!.GetValue<string>());
+
+        // The preview.4 keys keep their names and order; new keys only follow them.
         Assert.Equal(
-            ["kind", "externalAccountId", "lines", "posted", "sent", "balance", "balanceAtUtc"],
+            ["kind", "externalAccountId", "lines", "posted", "sent", "balance", "balanceAtUtc", "balanceSide"],
             bank.AsObject().Select(p => p.Key));
+        Assert.Equal(
+            ["kind", "externalAccountId", "lines", "posted", "sent", "balance", "balanceAtUtc", "balanceSide",
+             "pendingAmount", "pendingLines", "balanceWithPending", "creditLimit", "availableCreditLimit", "minimumPayment", "billCloseDate", "billDueDate"],
+            card.AsObject().Select(p => p.Key));
     }
 
     [Fact]
@@ -102,17 +119,20 @@ public sealed class PluggyIntegrationPluginTests
         Assert.All(server.RequestsTo("/v2/transactions"), r =>
         {
             Assert.Equal("api.pluggy.ai", r.Uri.Host);
-            Assert.Equal("2026-09-19", r.Query("dateFrom"));
             Assert.Null(r.Query("createdAtFrom"));
             Assert.Null(r.Query("dateTo"));
         });
+        Assert.All(bankPages, r => Assert.Equal("2026-09-19", r.Query("dateFrom")));
+        // Cards are read from 62 days before today (14 Oct) so that every pending purchase is seen.
+        Assert.All(server.TransactionRequests(FakePluggyServer.CardAccountId), r => Assert.Equal("2026-08-13", r.Query("dateFrom")));
         Assert.Equal(
             ["00000000-0000-4000-8000-000000000c05", "00000000-0000-4000-8000-000000000c06", "00000000-0000-4000-8000-000000000c07",
              "00000000-0000-4000-8000-000000000c08", "00000000-0000-4000-8000-000000000c09", "00000000-0000-4000-8000-000000000d02"],
-            result.ImportEvents.Select(e => e.ExternalId).Order());
+            result.ImportEvents.Where(e => e.ExternalAccountId is BankAccountKey or CardAccountKey).Select(e => e.ExternalId).Order());
         var diagnostics = JsonNode.Parse(result.ProviderDiagnosticsJson!)!;
-        Assert.Equal(4, diagnostics["sourceDiagnostics"]!["transactionPages"]!.GetValue<int>()); // 3 bank + 1 card (d02, d03)
+        Assert.Equal(5, diagnostics["sourceDiagnostics"]!["transactionPages"]!.GetValue<int>()); // 3 bank + 2 card (d01..d03)
         Assert.Equal("2026-09-19", diagnostics["sourceDiagnostics"]!["transactionsDateFrom"]!.GetValue<string>());
+        Assert.Equal("2026-08-13", diagnostics["sourceDiagnostics"]!["cardTransactionsDateFrom"]!.GetValue<string>());
     }
 
     [Fact]
@@ -152,7 +172,7 @@ public sealed class PluggyIntegrationPluginTests
         var windowed = await windowedHost.Plugin.SyncAsync(PluggyTestHost.Request(windowStart: start), Ct);
         var full = await fullHost.Plugin.SyncAsync(PluggyTestHost.Request(), Ct);
 
-        Assert.All(server.RequestsTo("/v2/transactions"), r => Assert.Equal(expectedDateFrom, r.Query("dateFrom")));
+        Assert.All(server.TransactionRequests(FakePluggyServer.BankAccountId), r => Assert.Equal(expectedDateFrom, r.Query("dateFrom")));
         var expected = full.ImportEvents
             .Where(e => BrazilDate(e.OccurredAtUtc) >= sendFrom)
             .Select(e => (e.ExternalId, e.IdempotencyKey))
@@ -251,16 +271,18 @@ public sealed class PluggyIntegrationPluginTests
         // Window start 12 Oct → sent from 5 Oct (seven days of overlap) → requested from 4 Oct (one day of margin).
         var result = await host.Plugin.SyncAsync(PluggyTestHost.Request(windowStart: new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.Zero)), Ct);
 
-        Assert.Equal(["00000000-0000-4000-8000-000000000c09", "00000000-0000-4000-8000-000000000d02"], result.ImportEvents.Select(e => e.ExternalId).Order());
+        Assert.Equal(["00000000-0000-4000-8000-000000000c09", "00000000-0000-4000-8000-000000000d02"],
+            result.ImportEvents.Where(e => e.ExternalAccountId is BankAccountKey or CardAccountKey).Select(e => e.ExternalId).Order());
         Assert.Equal(2, server.RequestsTo("/v2/transactions").Count);
-        Assert.All(server.RequestsTo("/v2/transactions"), r =>
-        {
-            Assert.Equal(["accountId", "dateFrom"], r.QueryNames());
-            Assert.Equal("2026-10-04", r.Query("dateFrom"));
-        });
+        Assert.All(server.RequestsTo("/v2/transactions"), r => Assert.Equal(["accountId", "dateFrom"], r.QueryNames()));
+        Assert.Equal("2026-10-04", server.TransactionRequests(FakePluggyServer.BankAccountId).Single().Query("dateFrom"));
+        Assert.Equal("2026-08-13", server.TransactionRequests(FakePluggyServer.CardAccountId).Single().Query("dateFrom"));
         var diagnostics = JsonNode.Parse(result.ProviderDiagnosticsJson!)!;
         Assert.Equal("2026-10-05", diagnostics["sentFrom"]!.GetValue<string>());
-        Assert.Equal([1, 2], diagnostics["accounts"]!.AsArray().Select(a => a!["lines"]!.GetValue<int>()));
+        // Bank: c09 read; card: d01..d03 read (pending lookback), d02 sent.
+        var accountRows = diagnostics["accounts"]!.AsArray().Where(a => a!["kind"]!.GetValue<string>() != "investment").ToList();
+        Assert.Equal([1, 3], accountRows.Select(a => a!["lines"]!.GetValue<int>()));
+        Assert.Equal([1, 1], accountRows.Select(a => a!["sent"]!.GetValue<int>()));
         Assert.Equal([new IntegrationCheckpoint("transactions", "2026-10-10")], result.Checkpoints);
     }
 

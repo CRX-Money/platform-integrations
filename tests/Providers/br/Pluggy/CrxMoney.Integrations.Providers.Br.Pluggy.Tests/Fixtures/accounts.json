@@ -26,16 +26,21 @@
       "subtype": "CREDIT_CARD",
       "name": "Cartao Exemplo",
       "number": "1234",
-      "balance": 89.9,
+      "balance": 131.9,
       "currencyCode": "BRL",
       "taxNumber": null,
       "bankData": null,
       "creditData": {
+        "level": "EXEMPLO",
         "brand": "EXEMPLO",
         "status": "ACTIVE",
+        "holderType": "MAIN",
         "creditLimit": 5000,
-        "availableCreditLimit": 4910.1,
-        "balanceDueDate": "2026-10-20"
+        "availableCreditLimit": 4868.1,
+        "minimumPayment": 13.19,
+        "balanceCloseDate": "2026-10-13",
+        "balanceDueDate": "2026-10-20T00:00:00.000Z",
+        "balanceForeignCurrency": null
       }
     }
   ]

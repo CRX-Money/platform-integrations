@@ -35,10 +35,10 @@ public enum OpenFinanceDirection
 /// <param name="CurrencyCode">ISO 4217 currency of the account.</param>
 /// <param name="Balance">
 /// The deposit balance the source reports, when it does. It is reported in the run diagnostics with
-/// <paramref name="BalanceAt"/> so the host can compare it with its ledger.
+/// <paramref name="BalanceAt"/> so the host can compare it with its ledger. Card balances go in <see cref="Card"/>.
 /// </param>
 /// <param name="HolderTaxId">The account holder's CPF/CNPJ, when known: a counterparty equal to it is the holder moving money between its own accounts.</param>
-/// <param name="BalanceAt">When the source last read <paramref name="Balance"/> from the bank, when it says.</param>
+/// <param name="BalanceAt">When the source last read <paramref name="Balance"/> (or <see cref="Card"/>) from the bank, when it says.</param>
 public sealed record OpenFinanceAccount(
     string SourceAccountId,
     OpenFinanceAccountKind Kind,
@@ -50,6 +50,12 @@ public sealed record OpenFinanceAccount(
     BrazilianTaxId? HolderTaxId = null,
     DateTimeOffset? BalanceAt = null)
 {
+    /// <summary>
+    /// What the issuer reports a card owes, for card accounts whose source reports it. The plugin splits it into
+    /// the settled balance and the pending amount (see <see cref="OpenFinanceCardBalance"/>).
+    /// </summary>
+    public OpenFinanceCardBalance? Card { get; init; }
+
     /// <summary>The platform's external account id for this account; independent of the aggregator.</summary>
     /// <exception cref="OpenFinanceIdentityException">The account lacks the identity its kind requires.</exception>
     public string ExternalAccountId => Kind switch
@@ -120,6 +126,35 @@ public sealed record OpenFinanceTransaction(
     public DateOnly BookingDate => BrazilBankingCalendar.DateOf(TransactionTime);
 }
 
+/// <summary>A card as the other side of a bill payment knows it.</summary>
+/// <param name="IssuerCompe">COMPE code of the issuer.</param>
+/// <param name="CardLast4">Last four digits.</param>
+/// <param name="BillId">The bill the payment was booked on, when the card line says.</param>
+public sealed record OpenFinanceCardReference(string IssuerCompe, string CardLast4, string? BillId);
+
+/// <summary>The other side of a transfer-like movement, found by matching amounts and dates.</summary>
+/// <param name="ExternalAccountId">The other side's account (a position, a card, a deposit account).</param>
+/// <param name="IdempotencyKey">The other side's import event.</param>
+/// <param name="Basis">How the pair was found: <c>amountAndDate</c>.</param>
+public sealed record OpenFinancePair(string ExternalAccountId, string IdempotencyKey, string Basis = OpenFinancePair.AmountAndDate)
+{
+    /// <summary>Same amount, booking dates within the plugin's tolerance, and a single candidate account.</summary>
+    public const string AmountAndDate = "amountAndDate";
+}
+
+/// <summary>What the plugin found on the other side of an account line; written to its provider data.</summary>
+public sealed record OpenFinanceLineLinks
+{
+    /// <summary>The paired event on the other side.</summary>
+    public OpenFinancePair? Pair { get; init; }
+
+    /// <summary>On a checking-side card bill payment: the card that was paid.</summary>
+    public OpenFinanceCardReference? PaidCard { get; init; }
+
+    /// <summary>On a checking-side investment sweep: the position it moved money to or from.</summary>
+    public OpenFinanceInvestment? Investment { get; init; }
+}
+
 /// <summary>Everything one read of a connection returned.</summary>
 /// <param name="Accounts">The connection's accounts with their transactions.</param>
 /// <param name="CredentialExpiresAt">When the source says the consent (or credential) expires, if it does.</param>
@@ -127,10 +162,35 @@ public sealed record OpenFinanceTransaction(
 public sealed record OpenFinanceSnapshot(
     IReadOnlyList<OpenFinanceAccountTransactions> Accounts,
     DateTimeOffset? CredentialExpiresAt,
-    string? DiagnosticsJson = null);
+    string? DiagnosticsJson = null)
+{
+    /// <summary>The connection's investment positions with their movements; empty when the source reads none.</summary>
+    public IReadOnlyList<OpenFinanceInvestmentMovements> Investments { get; init; } = [];
+}
 
 /// <summary>One account and its transactions from the requested read date on (see <see cref="IOpenFinanceSource.ReadAsync"/>).</summary>
 public sealed record OpenFinanceAccountTransactions(OpenFinanceAccount Account, IReadOnlyList<OpenFinanceTransaction> Transactions);
+
+/// <summary>
+/// What a card owes as its issuer reports it. Open Finance issuers report the <b>used limit</b>, which includes
+/// purchases that are authorised but not yet posted; the plugin subtracts the card's pending lines to get the
+/// settled balance, the one its posted lines prove.
+/// </summary>
+/// <param name="Owed">The amount the issuer reports as owed (positive = owed by the holder).</param>
+/// <param name="IncludesPending">True when <paramref name="Owed"/> already contains the pending lines (the used limit).</param>
+/// <param name="CreditLimit">The card's credit limit, when reported.</param>
+/// <param name="AvailableCreditLimit">The limit still available, when reported.</param>
+/// <param name="MinimumPayment">The minimum payment of the current bill, when reported.</param>
+/// <param name="BillCloseDate">The closing date of the current bill, when reported.</param>
+/// <param name="BillDueDate">The due date of the current bill, when reported.</param>
+public sealed record OpenFinanceCardBalance(
+    decimal Owed,
+    bool IncludesPending,
+    decimal? CreditLimit = null,
+    decimal? AvailableCreditLimit = null,
+    decimal? MinimumPayment = null,
+    DateOnly? BillCloseDate = null,
+    DateOnly? BillDueDate = null);
 
 /// <summary>The outcome of a connection test.</summary>
 /// <param name="Summary">A short, user-facing description (institution, consent state). No secrets.</param>

@@ -16,13 +16,20 @@ public interface IOpenFinanceSource
     /// <exception cref="OpenFinanceSourceException">An expected failure: bad credentials, consent problems, upstream errors.</exception>
     Task<OpenFinanceConnectionCheck> CheckConnectionAsync(IntegrationSyncRequest request, CancellationToken cancellationToken);
 
-    /// <summary>Reads every account of the connection with its transactions from <paramref name="readFrom"/> on.</summary>
+    /// <summary>Reads every account of the connection with its transactions from <paramref name="readFrom"/> on, and its investment positions.</summary>
     /// <param name="request">The host's request.</param>
     /// <param name="readFrom">
     /// The first booking date (Brazil's calendar) the plugin will send, or <c>null</c> for the full history.
     /// A source must return <b>every</b> posted line booked on or after it and may return earlier lines too
     /// (the plugin drops them). Lines that share a key identity also share their booking date, so a read that
     /// starts at a whole date numbers them exactly as a full read does and the keys stay the same.
+    /// <para>
+    /// Two more rules, whatever <paramref name="readFrom"/> is. A card reported with an
+    /// <see cref="OpenFinanceAccount.Card"/> balance that includes pending lines must come with <b>every</b> pending
+    /// line of that card, so the plugin can split the balance into settled and pending. Investment positions
+    /// (<see cref="OpenFinanceSnapshot.Investments"/>) come with every movement the source holds; the plugin
+    /// applies the window to them as it does to account lines.
+    /// </para>
     /// </param>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <exception cref="OpenFinanceSourceException">An expected failure: bad credentials, consent problems, upstream errors.</exception>
