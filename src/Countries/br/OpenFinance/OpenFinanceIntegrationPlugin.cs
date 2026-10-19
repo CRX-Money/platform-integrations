@@ -10,13 +10,14 @@ namespace CrxMoney.Integrations.Countries.Br.OpenFinance;
 /// <summary>
 /// The plugin every Open Finance aggregator shares. A concrete plugin only names itself and hands over
 /// its <see cref="IOpenFinanceSource"/>; reading, key assignment, mapping, windowing, checkpoints and the
-/// balance check happen here, identically for every aggregator.
+/// balance report happen here, identically for every aggregator.
 /// </summary>
 /// <remarks>
 /// A request with <c>ConnectionId &lt;= 0</c> is a connection test (<see cref="IOpenFinanceSource.CheckConnectionAsync"/>).
-/// Sources read every line they know (aggregators such as Pluggy have no date filter), so key ordinals
-/// are always computed over the full set; only lines from <see cref="OverlapDays"/> before the host's
-/// window start are returned.
+/// A sync asks the source for lines booked from <see cref="OverlapDays"/> before the host's window start
+/// (everything when the host gives no start) and sends exactly those. The source returns every line of each
+/// booking date it covers, so key ordinals match a full read. The account balance cannot be checked against
+/// a window of lines; it is reported with its date for the host to compare with its ledger.
 /// </remarks>
 public abstract class OpenFinanceIntegrationPlugin : IIntegrationPlugin, IIntegrationImportSchemaManifestProvider
 {
@@ -97,8 +98,8 @@ public abstract class OpenFinanceIntegrationPlugin : IIntegrationPlugin, IIntegr
 
     private async Task<IntegrationSyncResult> ReadAsync(IntegrationSyncRequest request, DateTimeOffset startedAt, CancellationToken cancellationToken)
     {
-        var snapshot = await _source.ReadAsync(request, cancellationToken).ConfigureAwait(false);
-        DateOnly? sendFrom = request.WindowStartUtc is { } start ? BrazilBankingCalendar.DateOf(start).AddDays(-OverlapDays) : null;
+        var sendFrom = SendFrom(request);
+        var snapshot = await _source.ReadAsync(request, sendFrom, cancellationToken).ConfigureAwait(false);
 
         var events = new List<IntegrationImportEvent>();
         var accountReports = new List<Action<Utf8JsonWriter>>();
@@ -119,17 +120,23 @@ public abstract class OpenFinanceIntegrationPlugin : IIntegrationPlugin, IIntegr
                 sent++;
             }
 
-            var net = posted.Sum(t => t.Direction == OpenFinanceDirection.Credit ? t.Amount : -t.Amount);
+            var externalAccountId = account.ExternalAccountId;
             accountReports.Add(writer =>
             {
                 writer.WriteStartObject();
                 writer.WriteString("kind", account.Kind == OpenFinanceAccountKind.CreditCard ? "creditCard" : "deposit");
+                writer.WriteString("externalAccountId", externalAccountId);
                 writer.WriteNumber("lines", transactions.Count);
                 writer.WriteNumber("posted", posted.Count);
                 writer.WriteNumber("sent", sent);
-                // A deposit account read from its opening reconciles: credits minus debits equal the balance.
+                // A window of lines proves nothing about the balance; the host compares it with its ledger.
                 if (account.Kind == OpenFinanceAccountKind.Deposit && account.Balance is { } balance)
-                    writer.WriteBoolean("balanceMatchesNet", decimal.Round(balance - net, 2) == 0m);
+                {
+                    writer.WriteNumber("balance", balance);
+                    if (account.BalanceAt is { } balanceAt)
+                        writer.WriteString("balanceAtUtc", balanceAt.ToUniversalTime());
+                }
+
                 writer.WriteEndObject();
             });
         }
@@ -153,6 +160,9 @@ public abstract class OpenFinanceIntegrationPlugin : IIntegrationPlugin, IIntegr
             WriteRaw(writer, "sourceDiagnostics", snapshot.DiagnosticsJson);
         });
 
+        // A window with no new lines keeps the latest date an earlier sync read.
+        if (PreviousLatest(request) is { } previous && (latest is null || previous > latest))
+            latest = previous;
         IntegrationCheckpoint[] checkpoints = latest is { } last
             ? [new IntegrationCheckpoint(CheckpointResource, last.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))]
             : [];
@@ -167,6 +177,19 @@ public abstract class OpenFinanceIntegrationPlugin : IIntegrationPlugin, IIntegr
             importEvents: events,
             providerDiagnosticsJson: diagnostics);
     }
+
+    /// <summary>
+    /// The first booking date a sync reads and sends: <see cref="OverlapDays"/> before the host's window start,
+    /// or <c>null</c> (the full history) when the host gives no start.
+    /// </summary>
+    private static DateOnly? SendFrom(IntegrationSyncRequest request) =>
+        request.WindowStartUtc is { } start ? BrazilBankingCalendar.DateOf(start).AddDays(-OverlapDays) : null;
+
+    private static DateOnly? PreviousLatest(IntegrationSyncRequest request) =>
+        request.PreviousCheckpoints?.FirstOrDefault(c => c.Resource == CheckpointResource) is { } checkpoint
+        && DateOnly.TryParseExact(checkpoint.CursorValue, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+            ? date
+            : null;
 
     private static void WriteRaw(Utf8JsonWriter writer, string name, string? json)
     {

@@ -33,8 +33,12 @@ public enum OpenFinanceDirection
 /// <param name="IssuerCompe">COMPE code of the card issuer; required for cards.</param>
 /// <param name="CardLast4">Last four digits of the card; required for cards.</param>
 /// <param name="CurrencyCode">ISO 4217 currency of the account.</param>
-/// <param name="Balance">The balance the source reports, when it does; used for the reconciliation check.</param>
+/// <param name="Balance">
+/// The deposit balance the source reports, when it does. It is reported in the run diagnostics with
+/// <paramref name="BalanceAt"/> so the host can compare it with its ledger.
+/// </param>
 /// <param name="HolderTaxId">The account holder's CPF/CNPJ, when known: a counterparty equal to it is the holder moving money between its own accounts.</param>
+/// <param name="BalanceAt">When the source last read <paramref name="Balance"/> from the bank, when it says.</param>
 public sealed record OpenFinanceAccount(
     string SourceAccountId,
     OpenFinanceAccountKind Kind,
@@ -43,7 +47,8 @@ public sealed record OpenFinanceAccount(
     string? CardLast4,
     string CurrencyCode,
     decimal? Balance,
-    BrazilianTaxId? HolderTaxId = null)
+    BrazilianTaxId? HolderTaxId = null,
+    DateTimeOffset? BalanceAt = null)
 {
     /// <summary>The platform's external account id for this account; independent of the aggregator.</summary>
     /// <exception cref="OpenFinanceIdentityException">The account lacks the identity its kind requires.</exception>
@@ -124,7 +129,7 @@ public sealed record OpenFinanceSnapshot(
     DateTimeOffset? CredentialExpiresAt,
     string? DiagnosticsJson = null);
 
-/// <summary>One account and all of its transactions known to the source.</summary>
+/// <summary>One account and its transactions from the requested read date on (see <see cref="IOpenFinanceSource.ReadAsync"/>).</summary>
 public sealed record OpenFinanceAccountTransactions(OpenFinanceAccount Account, IReadOnlyList<OpenFinanceTransaction> Transactions);
 
 /// <summary>The outcome of a connection test.</summary>

@@ -39,6 +39,23 @@ public sealed class PluggyLiveProbeTests
         var again = await plugin.SyncAsync(request, ct);
         Assert.Equal(result.ImportEvents.Select(e => e.IdempotencyKey).Order(), again.ImportEvents.Select(e => e.IdempotencyKey).Order());
 
+        // A windowed read (Pluggy's dateFrom) sends exactly what the full read sends from the same date, with the same keys.
+        var windowStart = DateTimeOffset.UtcNow.AddDays(-30);
+        var windowed = await plugin.SyncAsync(request with { WindowStartUtc = windowStart }, ct);
+        Assert.True(windowed.Status == IntegrationSyncStatus.Succeeded, $"Windowed sync failed: {windowed.ErrorKind} {windowed.ErrorMessage}");
+        var sentFrom = DateOnly.Parse(JsonNode.Parse(windowed.ProviderDiagnosticsJson!)!["sentFrom"]!.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal(
+            result.ImportEvents.Where(e => DateOnly.FromDateTime(e.OccurredAtUtc.ToOffset(TimeSpan.FromHours(-3)).DateTime) >= sentFrom).Select(e => e.IdempotencyKey).Order(),
+            windowed.ImportEvents.Select(e => e.IdempotencyKey).Order());
+
+        // On a full read, a deposit account's credits minus debits still equal the balance Pluggy reports.
+        var reconciles = JsonNode.Parse(result.ProviderDiagnosticsJson!)!["accounts"]!.AsArray()
+            .Where(a => a!["balance"] is not null)
+            .Select(a => result.ImportEvents
+                .Where(e => e.ExternalAccountId == a!["externalAccountId"]!.GetValue<string>())
+                .Sum(e => e.Type == "deposit" ? e.Amount!.Value : -e.Amount!.Value) == a!["balance"]!.GetValue<decimal>())
+            .ToList();
+
         var data = result.ImportEvents.Select(e => JsonNode.Parse(e.ProviderData!)!).ToList();
         var accountShapes = result.ImportEvents.Select(e => System.Text.RegularExpressions.Regex.Replace(e.ExternalAccountId, "[0-9]", "9")).Distinct();
         var message = string.Join(" | ",
@@ -49,14 +66,19 @@ public sealed class PluggyLiveProbeTests
             $"withTaxId={data.Count(d => d["counterparty"]?["taxId"] is not null)}",
             $"holderSide={data.Count(d => d["counterpartyIsHolder"] is not null)}",
             $"hints=[{string.Join(", ", data.GroupBy(d => d["transferHint"]?.GetValue<string>() ?? "none").Select(g => $"{g.Key}:{g.Count()}"))}]",
-            $"diagnostics={Redact(result.ProviderDiagnosticsJson)}");
+            $"windowed={windowed.ImportEvents.Count} sentFrom={sentFrom:yyyy-MM-dd}",
+            $"depositBalanceMatchesFullNet=[{string.Join(", ", reconciles)}]",
+            $"diagnostics={Redact(result.ProviderDiagnosticsJson)}",
+            $"windowedDiagnostics={Redact(windowed.ProviderDiagnosticsJson)}");
         TestContext.Current.SendDiagnosticMessage(message);
         TestContext.Current.AddAttachment("summary", message);
         if (Environment.GetEnvironmentVariable("PLUGGY_PROBE_OUT") is { Length: > 0 } outPath)
             await File.WriteAllTextAsync(outPath, message, ct);
     }
 
+    /// <summary>Dates, account ids and balances are replaced by markers; counts and statuses stay.</summary>
     private static string Redact(string? diagnostics) => diagnostics is null
         ? "none"
-        : System.Text.RegularExpressions.Regex.Replace(diagnostics, "\"(lastUpdatedAtUtc|credentialExpiresAtUtc)\":\"[^\"]+\"", "\"$1\":\"<set>\"");
+        : System.Text.RegularExpressions.Regex.Replace(diagnostics,
+            "\"(lastUpdatedAtUtc|credentialExpiresAtUtc|balanceAtUtc|externalAccountId|balance)\":(\"[^\"]*\"|-?[0-9.]+)", "\"$1\":\"<set>\"");
 }

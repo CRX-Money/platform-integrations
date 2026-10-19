@@ -53,16 +53,28 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   side is the account holder itself, as in sweeps), `pix` when present, `card` (last four, bill), a
   `transferHint` (`investment` for automatic CDB sweeps and similar,
   `card_bill_payment`), and the aggregator's raw line as `sourcePayload`.
-- **Sync behaviour**: pending lines are never imported; sources read everything they
-  know and the plugin sends lines from seven days before the host's window start;
-  the checkpoint `transactions` holds the latest booking date; diagnostics include a
-  per-account check that credits minus debits equal the reported balance.
+- **Sync behaviour**: pending lines are never imported. The plugin asks the source
+  for lines booked from seven days before the host's window start (the full history
+  when the host gives no start) and sends exactly those. A source must return every
+  line of each booking date it covers, so lines that differ only by ordinal are
+  numbered as in a full read and keep their keys. The checkpoint `transactions` holds
+  the latest booking date read, and never moves back when a window reads nothing new.
+- **Run diagnostics** (the provider block the host shows per run): `source`,
+  `events`, `pendingSkipped`, `sentFrom` (absent on a full read),
+  `credentialExpiresAtUtc`, `sourceDiagnostics` and one `accounts` row per account:
+  `kind` (`deposit`/`creditCard`), `externalAccountId`, `lines` (read in the window),
+  `posted`, `sent` and, for deposit accounts whose source reports it, `balance` with
+  `balanceAtUtc`. A window of lines proves nothing about the balance, so the plugin
+  no longer reports `balanceMatchesNet`; comparing `balance` with the ledger as of
+  `balanceAtUtc` is the host's job.
 
 ### Adding an aggregator
 
 1. Implement `IOpenFinanceSource` in `src/Providers/br/<Aggregator>`: authenticate,
    check the consent in `CheckConnectionAsync`, and in `ReadAsync` return every
-   account (with its bank identity) and its lines normalised into
+   account (with its bank identity, and its balance when the aggregator reports it)
+   and every line booked on or after `readFrom` (all lines when it is `null`;
+   earlier lines are allowed and dropped), normalised into
    `OpenFinanceTransaction` (direction from the type, positive amount, the bank's
    transaction instant, counterparty CPF/CNPJ). Throw `OpenFinanceSourceException`
    with an `IntegrationErrorKind` for expected failures.
