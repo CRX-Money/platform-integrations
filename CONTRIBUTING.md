@@ -21,7 +21,11 @@ By contributing you agree that your contribution is licensed under the
 1. **Pick the folder.** `src/Providers/<cc>/<Provider>/`, where `<cc>` is the
    lowercase ISO 3166-1 alpha-2 code of the country whose regulator licenses the
    provider (`br`, `py`), or `global` for providers that work the same way across
-   countries. `<Provider>` is the provider's short name in PascalCase (`Inter`).
+   countries. `<Provider>` is the provider's short name in PascalCase (`Inter`,
+   `OpenFinance`). A plugin implements one provider (see the vocabulary in the
+   [README](README.md#vocabulary)); an aggregator that reaches a provider is an
+   adapter folder inside that provider's plugin (`OpenFinance/Pluggy/`), never a
+   plugin of its own.
 2. **Create the project** `CrxMoney.Integrations.Providers.<Cc>.<Provider>.csproj`
    (`CrxMoney.Integrations.Providers.Br.Inter`, `CrxMoney.Integrations.Providers.Global.Binance`),
    referencing only `src/Abstractions/CrxMoney.Integrations.Abstractions`, shared

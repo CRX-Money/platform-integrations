@@ -20,6 +20,8 @@ dotnet add package CrxMoney.Integrations.Abstractions --prerelease
 | `IntegrationCapability` | `.Plugins` | Flags: `Balances`, `Trades`, `Transfers`, `Prices`. |
 | `IntegrationPluginDefaults` | `.Plugins` | Suggested sync cadence (minutes) and backfill anchor date. |
 | `IIntegrationImportSchemaManifestProvider`, `IntegrationImportSchemaManifest`, `IntegrationImportSchemaManifestItem` | `.Plugins` | Optional: declare the JSON schemas used in `ProviderData`. |
+| `IIntegrationConnectionSettingsProvider`, `IntegrationConnectionSettingsManifest`, `IntegrationConnectionAdapterSettings`, `IntegrationConnectionSettingsField`, `IntegrationCredentialSlot`, `IntegrationConnectionWalkthrough` | `.Plugins` | Optional: declare each adapter's connection settings as a JSON Schema, with walkthrough text. |
+| `IIntegrationConnectionTester`, `IntegrationConnectionTestResult`, `IntegrationAccountOperator` | `.Plugins` | Optional: check settings before they are saved and describe the result in provider-neutral terms. |
 | `IntegrationSyncRequest` | `.Sync` | Input to one run: connection id, window, previous checkpoints, resolved credentials. |
 | `IntegrationSyncResult` | `.Sync` | Output of one run; build it with `Success(...)` or `Failure(...)`. |
 | `IntegrationImportEvent` | `.Sync` | The canonical, idempotent movement every provider folds into. |
@@ -68,6 +70,77 @@ Rules every plugin follows:
   `ProviderDiagnosticsJson`.
 - **Provider data.** Structured detail goes in `ProviderData` as JSON, with its
   schema declared through `IIntegrationImportSchemaManifestProvider`.
+
+## Connection settings
+
+A plugin may describe the form its connections need instead of leaving it to the
+host. `IIntegrationConnectionSettingsProvider.GetConnectionSettings(culture)`
+returns one `IntegrationConnectionAdapterSettings` per adapter (the code for one
+aggregator or channel inside the plugin):
+
+- `AdapterId`: stable, lower-case, unique in the plugin; the host stores it with
+  the connection.
+- `JsonSchema`: a JSON Schema (draft 2020-12) for the settings object. Each
+  property has `type`, `title`, `description`, and `format`/`pattern` where useful;
+  secrets carry `writeOnly: true`; `required` lists the mandatory fields. No
+  custom keywords, so any JSON Schema form generator can render it.
+- `Fields`: the same properties as the host stores them. `Slot` says where the
+  value travels in `IntegrationSyncRequest` (`ApiKey`, `ApiSecret`, `Passphrase`).
+  `IsSecret` means the value is never shown again once saved. `IsRequired`
+  matches `required`.
+- `Walkthrough`: optional steps (with links) and a closing note.
+
+Texts follow the requested BCP 47 culture when the plugin has it;
+`IntegrationConnectionSettingsManifest.Culture` says which culture was used.
+
+`IIntegrationConnectionTester.TestConnectionAsync(adapterId, request, culture)`
+checks the settings without importing anything. It returns
+`IntegrationConnectionTestResult`:
+
+- `Succeeded`, plus a `Summary` with no secrets and no aggregator branding;
+- `ErrorKind` on failure;
+- `CredentialExpiresAtUtc`, `LastRefreshedAtUtc` and `IsSandbox`;
+- `AccountOperators` (name and official website), which the host can match to the
+  account operators it knows.
+
+Both interfaces are optional. A plugin without them keeps working, and the host
+falls back to its own form.
+
+Example: the settings schema of the Open Finance Brasil plugin's Pluggy adapter
+(`en`). Its fields are `clientId` (slot `ApiKey`), `clientSecret` (slot `ApiSecret`,
+secret) and `itemId` (slot `Passphrase`):
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pluggy",
+  "description": "A Pluggy developer application and the item of one bank connected through Meu Pluggy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["clientId", "clientSecret", "itemId"],
+  "properties": {
+    "clientId": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Client ID",
+      "description": "The Client ID of your application in the Pluggy Dashboard (Applications)."
+    },
+    "clientSecret": {
+      "type": "string",
+      "minLength": 1,
+      "writeOnly": true,
+      "title": "Client Secret",
+      "description": "The application's Client Secret. Pluggy shows it only once; generate a new one if you did not keep it."
+    },
+    "itemId": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Item ID",
+      "description": "The id of the bank's item under Connected Items, on the application's Demo page."
+    }
+  }
+}
+```
 
 ## Versioning
 

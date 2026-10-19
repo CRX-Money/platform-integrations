@@ -15,8 +15,8 @@
   <Folder Name="/src/Providers/br/Inter/">
     <Project Path="src/Providers/br/Inter/CrxMoney.Integrations.Providers.Br.Inter/CrxMoney.Integrations.Providers.Br.Inter.csproj" />
   </Folder>
-  <Folder Name="/src/Providers/br/Pluggy/">
-    <Project Path="src/Providers/br/Pluggy/CrxMoney.Integrations.Providers.Br.Pluggy/CrxMoney.Integrations.Providers.Br.Pluggy.csproj" />
+  <Folder Name="/src/Providers/br/OpenFinance/">
+    <Project Path="src/Providers/br/OpenFinance/CrxMoney.Integrations.Providers.Br.OpenFinance/CrxMoney.Integrations.Providers.Br.OpenFinance.csproj" />
   </Folder>
   <Folder Name="/tests/" />
   <Folder Name="/tests/Abstractions/">
@@ -31,8 +31,8 @@
   <Folder Name="/tests/Providers/br/Inter/">
     <Project Path="tests/Providers/br/Inter/CrxMoney.Integrations.Providers.Br.Inter.Tests/CrxMoney.Integrations.Providers.Br.Inter.Tests.csproj" />
   </Folder>
-  <Folder Name="/tests/Providers/br/Pluggy/">
-    <Project Path="tests/Providers/br/Pluggy/CrxMoney.Integrations.Providers.Br.Pluggy.Tests/CrxMoney.Integrations.Providers.Br.Pluggy.Tests.csproj" />
+  <Folder Name="/tests/Providers/br/OpenFinance/">
+    <Project Path="tests/Providers/br/OpenFinance/CrxMoney.Integrations.Providers.Br.OpenFinance.Tests/CrxMoney.Integrations.Providers.Br.OpenFinance.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Build/">
     <Project Path="tests/Build/CrxMoney.Integrations.FixtureGuard.Tests/CrxMoney.Integrations.FixtureGuard.Tests.csproj" />

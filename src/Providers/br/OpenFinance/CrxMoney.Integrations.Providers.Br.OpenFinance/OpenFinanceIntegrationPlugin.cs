@@ -1,0 +1,429 @@
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
+using CrxMoney.Integrations.Abstractions.Plugins;
+using CrxMoney.Integrations.Abstractions.Sync;
+using CrxMoney.Integrations.Countries.Br;
+using Microsoft.Extensions.Logging;
+
+namespace CrxMoney.Integrations.Providers.Br.OpenFinance;
+
+/// <summary>
+/// The plugin every Open Finance aggregator shares. A concrete plugin only names itself and hands over
+/// its <see cref="IOpenFinanceSource"/>; reading, key assignment, mapping, windowing, checkpoints and the
+/// balance report happen here, identically for every aggregator.
+/// </summary>
+/// <remarks>
+/// A request with <c>ConnectionId &lt;= 0</c> is a connection test (<see cref="IOpenFinanceSource.CheckConnectionAsync"/>).
+/// A sync asks the source for lines booked from <see cref="OverlapDays"/> before the host's window start
+/// (everything when the host gives no start) and sends exactly those. The source returns every line of each
+/// booking date it covers, so key ordinals match a full read. The account balance cannot be checked against
+/// a window of lines; it is reported with its date for the host to compare with its ledger. A card's balance is
+/// reported settled (without its pending lines) with the pending amount beside it. Investment movements become
+/// events on their position's account under the same window, and sweeps and card bill payments are paired with
+/// their other side when one candidate matches (<see cref="OpenFinancePairing"/>).
+/// </remarks>
+public abstract class OpenFinanceIntegrationPlugin
+    : IIntegrationPlugin, IIntegrationImportSchemaManifestProvider, IIntegrationConnectionSettingsProvider, IIntegrationConnectionTester
+{
+    /// <summary>Checkpoint resource holding the latest booking date read.</summary>
+    public const string CheckpointResource = "transactions";
+
+    /// <summary>Days re-sent before the host's window start, for lines the bank books late.</summary>
+    public const int OverlapDays = 7;
+
+    private readonly IOpenFinanceSource _source;
+    private readonly TimeProvider _timeProvider;
+    private readonly ILogger _logger;
+
+    /// <summary>Creates the plugin around its source.</summary>
+    protected OpenFinanceIntegrationPlugin(IOpenFinanceSource source, TimeProvider timeProvider, ILogger logger)
+    {
+        _source = source;
+        _timeProvider = timeProvider;
+        _logger = logger;
+    }
+
+    /// <inheritdoc />
+    public abstract string ProviderId { get; }
+
+    /// <inheritdoc />
+    public abstract string DisplayName { get; }
+
+    /// <inheritdoc />
+    public IntegrationCapability Capabilities => IntegrationCapability.Transfers;
+
+    /// <summary>Daily: Open Finance aggregators refresh connected items about once a day.</summary>
+    public virtual IntegrationPluginDefaults Defaults => new(SyncEveryMinutes: 1440, SuggestedBackfillFromDate: null);
+
+    /// <inheritdoc />
+    public IntegrationImportSchemaManifest GetImportSchemaManifest() => OpenFinanceImportSchemas.Manifest;
+
+    /// <summary>The settings of the plugin's adapter(s). A plugin without its own declares none.</summary>
+    /// <inheritdoc />
+    public virtual IntegrationConnectionSettingsManifest GetConnectionSettings(string? culture = null) =>
+        new(ProviderId, OpenFinanceTexts.Resolve(culture), []);
+
+    /// <summary>
+    /// Checks the settings through the source (<see cref="IOpenFinanceSource.CheckConnectionAsync"/>) and describes
+    /// the result without the aggregator's name: refresh time, consent expiry, sandbox flag, and the account
+    /// operators found by their COMPE code in the country package's institution list.
+    /// </summary>
+    /// <inheritdoc />
+    public async Task<IntegrationConnectionTestResult> TestConnectionAsync(
+        string adapterId,
+        IntegrationSyncRequest request,
+        string? culture = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var texts = OpenFinanceTexts.For(culture);
+        if (!GetConnectionSettings(culture).Adapters.Any(a => string.Equals(a.AdapterId, adapterId, StringComparison.Ordinal)))
+            return IntegrationConnectionTestResult.Failure(IntegrationErrorKind.Configuration, texts.UnknownAdapter(adapterId));
+
+        try
+        {
+            var check = await _source.CheckConnectionAsync(request, cancellationToken).ConfigureAwait(false);
+            var operators = check.AccountOperatorCompes
+                .Select(BrazilianInstitutions.Find)
+                .OfType<BrazilianInstitution>()
+                .DistinctBy(i => i.Compe)
+                .Select(i => new IntegrationAccountOperator(i.Name, i.Website))
+                .ToList();
+            return new IntegrationConnectionTestResult(true, texts.Connected(check.LastRefreshedAt, check.CredentialExpiresAt, operators, check.IsSandbox))
+            {
+                CredentialExpiresAtUtc = check.CredentialExpiresAt?.ToUniversalTime(),
+                LastRefreshedAtUtc = check.LastRefreshedAt?.ToUniversalTime(),
+                IsSandbox = check.IsSandbox,
+                AccountOperators = operators,
+            };
+        }
+        catch (OpenFinanceSourceException ex)
+        {
+            _logger.LogWarning("{Provider} connection test failed ({ErrorKind}): {Reason}", ProviderId, ex.Kind, ex.Message);
+            return IntegrationConnectionTestResult.Failure(ex.Kind, ex.Message);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IntegrationSyncResult> SyncAsync(IntegrationSyncRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var startedAt = _timeProvider.GetUtcNow();
+        try
+        {
+            return request.ConnectionId <= 0
+                ? await TestAsync(request, startedAt, cancellationToken).ConfigureAwait(false)
+                : await ReadAsync(request, startedAt, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OpenFinanceSourceException ex)
+        {
+            _logger.LogWarning("{Provider} sync for connection {ConnectionId} failed ({ErrorKind}): {Reason}",
+                ProviderId, request.ConnectionId, ex.Kind, ex.Message);
+            return IntegrationSyncResult.Failure(startedAt, _timeProvider.GetUtcNow(), ex.Kind, ex.Message);
+        }
+        catch (OpenFinanceIdentityException ex)
+        {
+            // An account without the bank identity the keys are built from: fail rather than guess one.
+            _logger.LogWarning("{Provider} sync for connection {ConnectionId} received unusable data: {Reason}",
+                ProviderId, request.ConnectionId, ex.Message);
+            return IntegrationSyncResult.Failure(startedAt, _timeProvider.GetUtcNow(), IntegrationErrorKind.Upstream, ex.Message);
+        }
+    }
+
+    private async Task<IntegrationSyncResult> TestAsync(IntegrationSyncRequest request, DateTimeOffset startedAt, CancellationToken cancellationToken)
+    {
+        var check = await _source.CheckConnectionAsync(request, cancellationToken).ConfigureAwait(false);
+        var diagnostics = Diagnostics(writer =>
+        {
+            writer.WriteString("check", "connection");
+            writer.WriteString("source", _source.SourceName);
+            writer.WriteString("summary", check.Summary);
+            if (check.CredentialExpiresAt is { } expiresAt)
+                writer.WriteString("credentialExpiresAtUtc", expiresAt.ToUniversalTime());
+            WriteRaw(writer, "sourceDiagnostics", check.DiagnosticsJson);
+        });
+
+        return IntegrationSyncResult.Success(startedAt, _timeProvider.GetUtcNow(), 0, 0, 0, providerDiagnosticsJson: diagnostics);
+    }
+
+    private async Task<IntegrationSyncResult> ReadAsync(IntegrationSyncRequest request, DateTimeOffset startedAt, CancellationToken cancellationToken)
+    {
+        var sendFrom = SendFrom(request);
+        var snapshot = await _source.ReadAsync(request, sendFrom, cancellationToken).ConfigureAwait(false);
+        bool IsSent(DateOnly bookingDate) => sendFrom is not { } from || bookingDate >= from;
+
+        // Every posted line and every investment movement the read returned gets its key first: pairing looks at all
+        // of them, sending only at those in the window.
+        var lines = new List<PreparedLine>();
+        DateOnly? latest = null;
+        var pending = 0;
+        foreach (var (account, transactions) in snapshot.Accounts)
+        {
+            var posted = transactions.Where(t => !t.IsPending).ToList();
+            pending += transactions.Count - posted.Count;
+            foreach (var (transaction, ordinal) in OpenFinanceTransactionMapper.AssignOrdinals(account, posted))
+            {
+                if (latest is null || transaction.BookingDate > latest)
+                    latest = transaction.BookingDate;
+                lines.Add(new PreparedLine(account, transaction, ordinal,
+                    OpenFinanceTransactionMapper.IdempotencyKey(OpenFinanceTransactionMapper.LineIdentity(account, transaction), ordinal),
+                    OpenFinanceTransactionMapper.TransferHint(account, transaction),
+                    IsSent(transaction.BookingDate)));
+            }
+        }
+
+        var duplicate = snapshot.Investments.GroupBy(i => i.Investment.ExternalAccountId, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
+        if (duplicate is not null)
+            throw new OpenFinanceIdentityException("Two investment positions of the connection have the same identity; their keys would collide.");
+        var movements = new List<PreparedMovement>();
+        foreach (var (investment, investmentMovements) in snapshot.Investments)
+        {
+            foreach (var (movement, ordinal) in OpenFinanceInvestmentMapper.AssignOrdinals(investment, investmentMovements))
+            {
+                movements.Add(new PreparedMovement(investment, movement, ordinal,
+                    OpenFinanceInvestmentMapper.CashEventKey(investment, movement, ordinal), IsSent(movement.BookingDate)));
+            }
+        }
+
+        var investmentPairs = OpenFinancePairing.Match(
+            lines.Where(l => l.Account.Kind == OpenFinanceAccountKind.Deposit && l.Hint == OpenFinanceTransactionMapper.InvestmentHint)
+                .Select(l => new OpenFinancePairing.Side(l.Key, l.Account.ExternalAccountId, l.Transaction.Direction, l.Transaction.Amount, l.Transaction.BookingDate, l.IsSent)),
+            movements.Where(m => m.CashKey is not null)
+                .Select(m => new OpenFinancePairing.Side(m.CashKey!, m.Investment.ExternalAccountId,
+                    m.Movement.Operation == OpenFinanceInvestmentOperation.Application ? OpenFinanceDirection.Debit : OpenFinanceDirection.Credit,
+                    OpenFinanceInvestmentMapper.CashAmount(m.Movement)!.Value, m.Movement.BookingDate, m.IsSent) { Origin = m.Investment }),
+            OpenFinancePairing.InvestmentToleranceDays,
+            OpenFinancePairing.InvestmentToleranceDays);
+        var cardPairs = OpenFinancePairing.Match(
+            lines.Where(l => l.Account.Kind == OpenFinanceAccountKind.Deposit && l.Hint == OpenFinanceTransactionMapper.CardBillPaymentHint && l.Transaction.Direction == OpenFinanceDirection.Debit)
+                .Select(l => new OpenFinancePairing.Side(l.Key, l.Account.ExternalAccountId, OpenFinanceDirection.Debit, l.Transaction.Amount, l.Transaction.BookingDate, l.IsSent)),
+            lines.Where(l => l.Account.Kind == OpenFinanceAccountKind.CreditCard && l.Hint == OpenFinanceTransactionMapper.CardBillPaymentHint)
+                .Select(l => new OpenFinancePairing.Side(l.Key, l.Account.ExternalAccountId, OpenFinanceDirection.Debit, l.Transaction.Amount, l.Transaction.BookingDate, l.IsSent) { Origin = l }),
+            OpenFinancePairing.CardEarlierDays,
+            OpenFinancePairing.CardLaterDays);
+
+        var events = new List<IntegrationImportEvent>();
+        var sentPerAccount = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var line in lines.Where(l => l.IsSent))
+        {
+            events.Add(OpenFinanceTransactionMapper.Map(line.Account, line.Transaction, line.Ordinal, _source.SourceName, Links(line.Key)));
+            sentPerAccount[line.Account.ExternalAccountId] = sentPerAccount.GetValueOrDefault(line.Account.ExternalAccountId) + 1;
+        }
+
+        foreach (var movement in movements.Where(m => m.IsSent))
+        {
+            var pair = movement.CashKey is { } cashKey && investmentPairs.OtherToCash.TryGetValue(cashKey, out var cash)
+                ? new OpenFinancePair(cash.ExternalAccountId, cash.Key)
+                : null;
+            var mapped = OpenFinanceInvestmentMapper.Map(movement.Investment, movement.Movement, movement.Ordinal, _source.SourceName, pair);
+            events.AddRange(mapped);
+            var accountId = movement.Investment.ExternalAccountId;
+            sentPerAccount[accountId] = sentPerAccount.GetValueOrDefault(accountId) + mapped.Count;
+        }
+
+        OpenFinanceLineLinks? Links(string key)
+        {
+            if (investmentPairs.CashToOther.TryGetValue(key, out var position))
+                return new OpenFinanceLineLinks { Pair = new OpenFinancePair(position.ExternalAccountId, position.Key), Investment = (OpenFinanceInvestment)position.Origin! };
+            if (cardPairs.CashToOther.TryGetValue(key, out var cardSide))
+            {
+                var card = ((PreparedLine)cardSide.Origin!).Account;
+                var bill = ((PreparedLine)cardSide.Origin!).Transaction.CardBillId;
+                return new OpenFinanceLineLinks
+                {
+                    Pair = new OpenFinancePair(cardSide.ExternalAccountId, cardSide.Key),
+                    PaidCard = new OpenFinanceCardReference(BrazilianBankAccount.NormalizeCompe(card.IssuerCompe!), card.CardLast4!, bill),
+                };
+            }
+
+            return cardPairs.OtherToCash.TryGetValue(key, out var checking)
+                ? new OpenFinanceLineLinks { Pair = new OpenFinancePair(checking.ExternalAccountId, checking.Key) }
+                : null;
+        }
+
+        _logger.LogInformation("{Provider} sync for connection {ConnectionId}: {Accounts} account(s), {Investments} investment position(s), {Events} event(s) sent, {Pending} pending line(s) skipped.",
+            ProviderId, request.ConnectionId, snapshot.Accounts.Count, snapshot.Investments.Count, events.Count, pending);
+
+        var diagnostics = Diagnostics(writer =>
+        {
+            writer.WriteString("source", _source.SourceName);
+            writer.WriteNumber("events", events.Count);
+            writer.WriteNumber("pendingSkipped", pending);
+            if (sendFrom is { } from)
+                writer.WriteString("sentFrom", from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            if (snapshot.CredentialExpiresAt is { } expiresAt)
+                writer.WriteString("credentialExpiresAtUtc", expiresAt.ToUniversalTime());
+            writer.WriteStartArray("accounts");
+            foreach (var (account, transactions) in snapshot.Accounts)
+                WriteAccountReport(writer, account, transactions, sentPerAccount.GetValueOrDefault(account.ExternalAccountId));
+            foreach (var (investment, investmentMovements) in snapshot.Investments)
+                WriteInvestmentReport(writer, investment, investmentMovements.Count, sentPerAccount.GetValueOrDefault(investment.ExternalAccountId));
+            writer.WriteEndArray();
+            writer.WriteStartObject("transferPairs");
+            WritePairCounts(writer, "investment", investmentPairs.Counts, "positionSideUnpaired");
+            WritePairCounts(writer, "cardBillPayment", cardPairs.Counts, "cardSideUnpaired");
+            writer.WriteEndObject();
+            WriteRaw(writer, "sourceDiagnostics", snapshot.DiagnosticsJson);
+        });
+
+        // A window with no new lines keeps the latest date an earlier sync read.
+        if (PreviousLatest(request) is { } previous && (latest is null || previous > latest))
+            latest = previous;
+        IntegrationCheckpoint[] checkpoints = latest is { } last
+            ? [new IntegrationCheckpoint(CheckpointResource, last.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))]
+            : [];
+        return IntegrationSyncResult.Success(
+            startedAt,
+            _timeProvider.GetUtcNow(),
+            balancesImported: 0,
+            tradesImported: 0,
+            transfersImported: events.Count,
+            nonZeroAssetCodes: events.Select(e => e.AssetCode!).Distinct(StringComparer.Ordinal).ToArray(),
+            checkpoints: checkpoints,
+            importEvents: events,
+            providerDiagnosticsJson: diagnostics);
+    }
+
+    /// <summary>
+    /// One <c>accounts</c> row. A window of lines proves nothing about a deposit balance, so it is reported for the
+    /// host to compare with its ledger. A card's reported balance is split into the settled balance (what its posted
+    /// lines prove: the reported amount minus the pending lines it includes) and the pending amount.
+    /// </summary>
+    private static void WriteAccountReport(Utf8JsonWriter writer, OpenFinanceAccount account, IReadOnlyList<OpenFinanceTransaction> transactions, int sent)
+    {
+        var isCard = account.Kind == OpenFinanceAccountKind.CreditCard;
+        writer.WriteStartObject();
+        writer.WriteString("kind", isCard ? "creditCard" : "deposit");
+        writer.WriteString("externalAccountId", account.ExternalAccountId);
+        writer.WriteNumber("lines", transactions.Count);
+        writer.WriteNumber("posted", transactions.Count(t => !t.IsPending));
+        writer.WriteNumber("sent", sent);
+        if (!isCard && account.Balance is { } balance)
+        {
+            writer.WriteNumber("balance", balance);
+            if (account.BalanceAt is { } balanceAt)
+                writer.WriteString("balanceAtUtc", balanceAt.ToUniversalTime());
+            writer.WriteString("balanceSide", "asset");
+        }
+        else if (isCard && account.Card is { } card)
+        {
+            var pendingLines = transactions.Where(t => t.IsPending).ToList();
+            var pendingAmount = pendingLines.Sum(t => t.Direction == OpenFinanceDirection.Debit ? t.Amount : -t.Amount);
+            var settled = card.IncludesPending ? card.Owed - pendingAmount : card.Owed;
+            writer.WriteNumber("balance", settled);
+            if (account.BalanceAt is { } balanceAt)
+                writer.WriteString("balanceAtUtc", balanceAt.ToUniversalTime());
+            writer.WriteString("balanceSide", "liability");
+            writer.WriteNumber("pendingAmount", pendingAmount);
+            writer.WriteNumber("pendingLines", pendingLines.Count);
+            writer.WriteNumber("balanceWithPending", settled + pendingAmount);
+            WriteOptionalNumber(writer, "creditLimit", card.CreditLimit);
+            WriteOptionalNumber(writer, "availableCreditLimit", card.AvailableCreditLimit);
+            WriteOptionalNumber(writer, "minimumPayment", card.MinimumPayment);
+            WriteOptionalDate(writer, "billCloseDate", card.BillCloseDate);
+            WriteOptionalDate(writer, "billDueDate", card.BillDueDate);
+        }
+
+        WriteOptionalString(writer, "institutionWebsite", account.InstitutionWebsite);
+        writer.WriteEndObject();
+    }
+
+    /// <summary>One <c>accounts</c> row of kind <c>investment</c>: a position, its balance and what it says about itself.</summary>
+    private static void WriteInvestmentReport(Utf8JsonWriter writer, OpenFinanceInvestment investment, int movements, int sent)
+    {
+        writer.WriteStartObject();
+        writer.WriteString("kind", "investment");
+        writer.WriteString("externalAccountId", investment.ExternalAccountId);
+        writer.WriteNumber("lines", movements);
+        writer.WriteNumber("posted", movements);
+        writer.WriteNumber("sent", sent);
+        writer.WriteNumber("balance", investment.Balance);
+        writer.WriteString("balanceAtUtc", investment.BalanceDate.ToUniversalTime());
+        writer.WriteString("balanceSide", "asset");
+        writer.WriteString("externalAccountIdBasis", investment.IdentityBasis);
+        writer.WriteString("type", investment.Type);
+        WriteOptionalString(writer, "subtype", investment.Subtype);
+        WriteOptionalString(writer, "name", investment.Name);
+        WriteOptionalString(writer, "issuer", investment.Issuer);
+        WriteOptionalString(writer, "status", investment.Status);
+        writer.WriteString("currencyCode", investment.CurrencyCode);
+        WriteOptionalNumber(writer, "grossAmount", investment.GrossAmount);
+        WriteOptionalNumber(writer, "amountInvested", investment.AmountInvested);
+        WriteOptionalNumber(writer, "profit", investment.Profit);
+        WriteOptionalNumber(writer, "incomeTax", investment.IncomeTax);
+        WriteOptionalNumber(writer, "financialTax", investment.FinancialTax);
+        WriteOptionalDate(writer, "issueDate", investment.IssueDate);
+        WriteOptionalDate(writer, "dueDate", investment.DueDate);
+        WriteOptionalString(writer, "institutionWebsite", investment.InstitutionWebsite);
+        writer.WriteEndObject();
+    }
+
+    private static void WritePairCounts(Utf8JsonWriter writer, string name, OpenFinancePairing.Counts counts, string otherSideName)
+    {
+        writer.WriteStartObject(name);
+        writer.WriteNumber("lines", counts.Lines);
+        writer.WriteNumber("paired", counts.Paired);
+        writer.WriteNumber("ambiguous", counts.Ambiguous);
+        writer.WriteNumber("unmatched", counts.Unmatched);
+        writer.WriteNumber(otherSideName, counts.OtherSideUnpaired);
+        writer.WriteEndObject();
+    }
+
+    private static void WriteOptionalNumber(Utf8JsonWriter writer, string name, decimal? value)
+    {
+        if (value is { } number)
+            writer.WriteNumber(name, number);
+    }
+
+    private static void WriteOptionalDate(Utf8JsonWriter writer, string name, DateOnly? value)
+    {
+        if (value is { } date)
+            writer.WriteString(name, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+    }
+
+    private static void WriteOptionalString(Utf8JsonWriter writer, string name, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+            writer.WriteString(name, value.Trim());
+    }
+
+    private sealed record PreparedLine(OpenFinanceAccount Account, OpenFinanceTransaction Transaction, int Ordinal, string Key, string? Hint, bool IsSent);
+
+    private sealed record PreparedMovement(OpenFinanceInvestment Investment, OpenFinanceInvestmentMovement Movement, int Ordinal, string? CashKey, bool IsSent);
+
+    /// <summary>
+    /// The first booking date a sync reads and sends: <see cref="OverlapDays"/> before the host's window start,
+    /// or <c>null</c> (the full history) when the host gives no start.
+    /// </summary>
+    private static DateOnly? SendFrom(IntegrationSyncRequest request) =>
+        request.WindowStartUtc is { } start ? BrazilBankingCalendar.DateOf(start).AddDays(-OverlapDays) : null;
+
+    private static DateOnly? PreviousLatest(IntegrationSyncRequest request) =>
+        request.PreviousCheckpoints?.FirstOrDefault(c => c.Resource == CheckpointResource) is { } checkpoint
+        && DateOnly.TryParseExact(checkpoint.CursorValue, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+            ? date
+            : null;
+
+    private static void WriteRaw(Utf8JsonWriter writer, string name, string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return;
+        writer.WritePropertyName(name);
+        using var document = JsonDocument.Parse(json);
+        document.RootElement.WriteTo(writer);
+    }
+
+    private static string Diagnostics(Action<Utf8JsonWriter> write)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            write(writer);
+            writer.WriteEndObject();
+        }
+
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+}

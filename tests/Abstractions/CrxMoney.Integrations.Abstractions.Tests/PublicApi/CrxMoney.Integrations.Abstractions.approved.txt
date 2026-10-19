@@ -41,6 +41,14 @@ namespace CrxMoney.Integrations.Abstractions.Models
 }
 namespace CrxMoney.Integrations.Abstractions.Plugins
 {
+    public interface IIntegrationConnectionSettingsProvider
+    {
+        CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionSettingsManifest GetConnectionSettings(string? culture = null);
+    }
+    public interface IIntegrationConnectionTester
+    {
+        System.Threading.Tasks.Task<CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionTestResult> TestConnectionAsync(string adapterId, CrxMoney.Integrations.Abstractions.Sync.IntegrationSyncRequest request, string? culture = null, System.Threading.CancellationToken cancellationToken = default);
+    }
     public interface IIntegrationImportSchemaManifestProvider
     {
         CrxMoney.Integrations.Abstractions.Plugins.IntegrationImportSchemaManifest GetImportSchemaManifest();
@@ -53,6 +61,12 @@ namespace CrxMoney.Integrations.Abstractions.Plugins
         string ProviderId { get; }
         System.Threading.Tasks.Task<CrxMoney.Integrations.Abstractions.Sync.IntegrationSyncResult> SyncAsync(CrxMoney.Integrations.Abstractions.Sync.IntegrationSyncRequest request, System.Threading.CancellationToken cancellationToken = default);
     }
+    public sealed class IntegrationAccountOperator : System.IEquatable<CrxMoney.Integrations.Abstractions.Plugins.IntegrationAccountOperator>
+    {
+        public IntegrationAccountOperator(string Name, System.Uri? Website) { }
+        public string Name { get; init; }
+        public System.Uri? Website { get; init; }
+    }
     [System.Flags]
     public enum IntegrationCapability
     {
@@ -61,6 +75,64 @@ namespace CrxMoney.Integrations.Abstractions.Plugins
         Trades = 2,
         Transfers = 4,
         Prices = 8,
+    }
+    public sealed class IntegrationConnectionAdapterSettings : System.IEquatable<CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionAdapterSettings>
+    {
+        public IntegrationConnectionAdapterSettings(string AdapterId, string DisplayName, short SchemaVersion, string JsonSchema, System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionSettingsField> Fields) { }
+        public string AdapterId { get; init; }
+        public string DisplayName { get; init; }
+        public System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionSettingsField> Fields { get; init; }
+        public string JsonSchema { get; init; }
+        public short SchemaVersion { get; init; }
+        public CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionWalkthrough? Walkthrough { get; init; }
+    }
+    public sealed class IntegrationConnectionSettingsField : System.IEquatable<CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionSettingsField>
+    {
+        public IntegrationConnectionSettingsField(string Name, CrxMoney.Integrations.Abstractions.Plugins.IntegrationCredentialSlot Slot, bool IsSecret, bool IsRequired) { }
+        public bool IsRequired { get; init; }
+        public bool IsSecret { get; init; }
+        public string Name { get; init; }
+        public CrxMoney.Integrations.Abstractions.Plugins.IntegrationCredentialSlot Slot { get; init; }
+    }
+    public sealed class IntegrationConnectionSettingsManifest : System.IEquatable<CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionSettingsManifest>
+    {
+        public IntegrationConnectionSettingsManifest(string ProviderId, string Culture, System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionAdapterSettings> Adapters) { }
+        public System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionAdapterSettings> Adapters { get; init; }
+        public string Culture { get; init; }
+        public string ProviderId { get; init; }
+    }
+    public sealed class IntegrationConnectionTestResult : System.IEquatable<CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionTestResult>
+    {
+        public IntegrationConnectionTestResult(bool Succeeded, string Summary) { }
+        public System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Plugins.IntegrationAccountOperator> AccountOperators { get; init; }
+        public System.DateTimeOffset? CredentialExpiresAtUtc { get; init; }
+        public CrxMoney.Integrations.Abstractions.Sync.IntegrationErrorKind ErrorKind { get; init; }
+        public bool? IsSandbox { get; init; }
+        public System.DateTimeOffset? LastRefreshedAtUtc { get; init; }
+        public bool Succeeded { get; init; }
+        public string Summary { get; init; }
+        public static CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionTestResult Failure(CrxMoney.Integrations.Abstractions.Sync.IntegrationErrorKind kind, string message) { }
+        public static CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionTestResult Success(string summary) { }
+    }
+    public sealed class IntegrationConnectionWalkthrough : System.IEquatable<CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionWalkthrough>
+    {
+        public IntegrationConnectionWalkthrough(string Title, System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionWalkthroughStep> Steps) { }
+        public string? Note { get; init; }
+        public System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionWalkthroughStep> Steps { get; init; }
+        public string Title { get; init; }
+    }
+    public sealed class IntegrationConnectionWalkthroughStep : System.IEquatable<CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnectionWalkthroughStep>
+    {
+        public IntegrationConnectionWalkthroughStep(string Text) { }
+        public System.Uri? Link { get; init; }
+        public string Text { get; init; }
+    }
+    public enum IntegrationCredentialSlot
+    {
+        None = 0,
+        ApiKey = 1,
+        ApiSecret = 2,
+        Passphrase = 3,
     }
     public sealed class IntegrationImportSchemaManifest : System.IEquatable<CrxMoney.Integrations.Abstractions.Plugins.IntegrationImportSchemaManifest>
     {
