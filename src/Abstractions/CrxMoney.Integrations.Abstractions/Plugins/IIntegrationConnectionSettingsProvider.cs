@@ -68,7 +68,7 @@ public sealed record IntegrationConnectionSettingsManifest(
     IReadOnlyList<IntegrationConnectionAdapterSettings> Adapters);
 
 /// <summary>The settings of one adapter.</summary>
-/// <param name="AdapterId">Stable lower-case identifier, unique within the plugin (<c>pluggy</c>); the host stores it with the connection.</param>
+/// <param name="AdapterId">Stable identifier, unique within the plugin and compared exactly: the aggregator's name (<c>Pluggy</c>). The host stores it with the connection and passes it back in <see cref="Sync.IntegrationSyncRequest.AdapterId"/>.</param>
 /// <param name="DisplayName">Name shown to users (<c>Pluggy</c>).</param>
 /// <param name="SchemaVersion">Version of <paramref name="JsonSchema"/>; increase it for any incompatible change.</param>
 /// <param name="JsonSchema">

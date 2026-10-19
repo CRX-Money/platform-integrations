@@ -60,7 +60,7 @@ public sealed class PluggyRenameAndSettingsTests
 
         var plugin = Assert.Single(scope.ServiceProvider.GetServices<IIntegrationPlugin>());
 
-        Assert.Equal("Pluggy", plugin.ProviderId); // unchanged: the host stores it with every connection
+        Assert.Equal("Open Finance Brasil", plugin.ProviderId); // the provider; Pluggy is its adapter
         Assert.IsType<IIntegrationConnectionSettingsProvider>(plugin, exactMatch: false);
         Assert.IsType<IIntegrationConnectionTester>(plugin, exactMatch: false);
     }
@@ -78,9 +78,9 @@ public sealed class PluggyRenameAndSettingsTests
 
         var manifest = host.Plugin.GetConnectionSettings(culture);
 
-        Assert.Equal(("Pluggy", expectedCulture), (manifest.ProviderId, manifest.Culture));
+        Assert.Equal(("Open Finance Brasil", expectedCulture), (manifest.ProviderId, manifest.Culture));
         var adapter = Assert.Single(manifest.Adapters);
-        Assert.Equal(("pluggy", "Pluggy", (short)1), (adapter.AdapterId, adapter.DisplayName, adapter.SchemaVersion));
+        Assert.Equal(("Pluggy", "Pluggy", (short)1), (adapter.AdapterId, adapter.DisplayName, adapter.SchemaVersion));
         Assert.Equal(
             [("clientId", IntegrationCredentialSlot.ApiKey, false, true), ("clientSecret", IntegrationCredentialSlot.ApiSecret, true, true), ("itemId", IntegrationCredentialSlot.Passphrase, false, true)],
             adapter.Fields.Select(f => (f.Name, f.Slot, f.IsSecret, f.IsRequired)));
@@ -121,13 +121,41 @@ public sealed class PluggyRenameAndSettingsTests
         Assert.Equal("uuid", properties["itemId"]!["format"]!.GetValue<string>());
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Pluggy")]
+    public async Task A_sync_runs_on_the_adapter_the_request_names_or_on_the_only_one(string? adapterId)
+    {
+        using var host = new PluggyTestHost(FakePluggyServer.WithFixtures());
+
+        var result = await host.Plugin.SyncAsync(PluggyTestHost.Request() with { AdapterId = adapterId }, Ct);
+
+        Assert.Equal(IntegrationSyncStatus.Succeeded, result.Status);
+        Assert.Equal(23, result.ImportEvents.Count);
+    }
+
+    [Theory]
+    [InlineData("pluggy")] // adapter ids are compared exactly, like the host's Aggregator.Name
+    [InlineData("Belvo")]
+    public async Task A_sync_naming_an_unknown_adapter_is_a_configuration_failure(string adapterId)
+    {
+        var server = FakePluggyServer.WithFixtures();
+        using var host = new PluggyTestHost(server);
+
+        var result = await host.Plugin.SyncAsync(PluggyTestHost.Request() with { AdapterId = adapterId }, Ct);
+
+        Assert.Equal(IntegrationErrorKind.Configuration, result.ErrorKind);
+        Assert.Contains(adapterId, result.ErrorMessage, StringComparison.Ordinal);
+        Assert.Empty(server.Requests);
+    }
+
     [Fact]
     public async Task A_connection_test_reports_refresh_consent_and_the_account_operator()
     {
         var server = FakePluggyServer.WithFixtures();
         using var host = new PluggyTestHost(server);
 
-        var result = await host.Plugin.TestConnectionAsync("pluggy", PluggyTestHost.Request(connectionId: 0), cancellationToken: Ct);
+        var result = await host.Plugin.TestConnectionAsync("Pluggy", PluggyTestHost.Request(connectionId: 0), cancellationToken: Ct);
 
         Assert.True(result.Succeeded, result.Summary);
         Assert.Equal(IntegrationErrorKind.None, result.ErrorKind);
@@ -146,7 +174,7 @@ public sealed class PluggyRenameAndSettingsTests
     {
         using var host = new PluggyTestHost(FakePluggyServer.WithFixtures());
 
-        var result = await host.Plugin.TestConnectionAsync("pluggy", PluggyTestHost.Request(connectionId: 0), "pt-BR", Ct);
+        var result = await host.Plugin.TestConnectionAsync("Pluggy", PluggyTestHost.Request(connectionId: 0), "pt-BR", Ct);
 
         Assert.Equal("Conexão funcionando. Dados atualizados em 13/10/2026 09:00 UTC. Consentimento válido até 13/10/2027. Contas em Inter.", result.Summary);
     }
@@ -158,7 +186,7 @@ public sealed class PluggyRenameAndSettingsTests
             FakePluggyServer.Json("""{"message":"Product not enabled","code":403}""", HttpStatusCode.Forbidden));
         using var host = new PluggyTestHost(server);
 
-        var result = await host.Plugin.TestConnectionAsync("pluggy", PluggyTestHost.Request(connectionId: 0), cancellationToken: Ct);
+        var result = await host.Plugin.TestConnectionAsync("Pluggy", PluggyTestHost.Request(connectionId: 0), cancellationToken: Ct);
 
         Assert.True(result.Succeeded);
         Assert.Empty(result.AccountOperators);
@@ -171,14 +199,14 @@ public sealed class PluggyRenameAndSettingsTests
             FakePluggyServer.Json("""{"message":"Invalid credentials","code":401}""", HttpStatusCode.Unauthorized));
         using var host = new PluggyTestHost(server);
 
-        var rejected = await host.Plugin.TestConnectionAsync("pluggy", PluggyTestHost.Request(connectionId: 0), cancellationToken: Ct);
-        var unknown = await host.Plugin.TestConnectionAsync("belvo", PluggyTestHost.Request(connectionId: 0), "pt-BR", Ct);
-        var noItem = await host.Plugin.TestConnectionAsync("pluggy", PluggyTestHost.Request(connectionId: 0, itemId: null), cancellationToken: Ct);
+        var rejected = await host.Plugin.TestConnectionAsync("Pluggy", PluggyTestHost.Request(connectionId: 0), cancellationToken: Ct);
+        var unknown = await host.Plugin.TestConnectionAsync("Belvo", PluggyTestHost.Request(connectionId: 0), "pt-BR", Ct);
+        var noItem = await host.Plugin.TestConnectionAsync("Pluggy", PluggyTestHost.Request(connectionId: 0, itemId: null), cancellationToken: Ct);
 
         Assert.Equal((false, IntegrationErrorKind.Authentication), (rejected.Succeeded, rejected.ErrorKind));
         Assert.DoesNotContain("synthetic-client-secret", rejected.Summary, StringComparison.Ordinal);
         Assert.Equal((false, IntegrationErrorKind.Configuration), (unknown.Succeeded, unknown.ErrorKind));
-        Assert.Equal("Este plugin não tem o adaptador 'belvo'.", unknown.Summary);
+        Assert.Equal("Este plugin não tem o adaptador 'Belvo'.", unknown.Summary);
         Assert.Equal(IntegrationErrorKind.Configuration, noItem.ErrorKind);
     }
 }

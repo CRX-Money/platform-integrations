@@ -1,17 +1,25 @@
+using CrxMoney.Integrations.Abstractions.Plugins;
 using CrxMoney.Integrations.Abstractions.Sync;
 using CrxMoney.Integrations.Countries.Br;
 
 namespace CrxMoney.Integrations.Providers.Br.OpenFinance;
 
 /// <summary>
-/// An aggregator (or any other channel) that reads Brazilian Open Finance data. This is the only
-/// thing a new aggregator has to implement: <see cref="OpenFinanceIntegrationPlugin"/> does the
-/// mapping, keys, checkpoints and diagnostics for every source the same way.
+/// An adapter: one aggregator (or any other channel) that reads Brazilian Open Finance data. This is the
+/// only thing a new aggregator has to implement: <see cref="OpenFinanceIntegrationPlugin"/> does the
+/// mapping, keys, checkpoints and diagnostics for every adapter the same way.
 /// </summary>
 public interface IOpenFinanceSource
 {
-    /// <summary>Short name recorded in provider data (<c>Pluggy</c>).</summary>
+    /// <summary>
+    /// The aggregator's name (<c>Pluggy</c>): the adapter id the host stores with each connection
+    /// (<see cref="IntegrationSyncRequest.AdapterId"/>) and the <c>provider</c> recorded in provider data.
+    /// </summary>
     string SourceName { get; }
+
+    /// <summary>The adapter's connection settings in <paramref name="culture"/>, or <c>null</c> when it declares none.</summary>
+    /// <param name="culture">A BCP 47 culture name; the adapter falls back to its default.</param>
+    IntegrationConnectionAdapterSettings? GetConnectionSettings(string? culture) => null;
 
     /// <summary>Checks the credentials and the consent without reading transactions.</summary>
     /// <exception cref="OpenFinanceSourceException">An expected failure: bad credentials, consent problems, upstream errors.</exception>

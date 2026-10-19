@@ -26,11 +26,17 @@ internal abstract class OpenFinanceTexts
 
     public abstract string UnknownAdapter(string adapterId);
 
+    public abstract string NoAdapter(int adapters);
+
     public abstract string Connected(DateTimeOffset? lastRefreshed, DateTimeOffset? consentExpires, IReadOnlyList<IntegrationAccountOperator> operators, bool? isSandbox);
 
     private sealed class EnglishOpenFinanceTexts : OpenFinanceTexts
     {
         public override string UnknownAdapter(string adapterId) => $"This plugin has no adapter '{adapterId}'.";
+
+        public override string NoAdapter(int adapters) => adapters == 0
+            ? "No Open Finance adapter is registered with this host."
+            : $"The connection names no adapter and this plugin has {adapters}; set its adapter.";
 
         public override string Connected(DateTimeOffset? lastRefreshed, DateTimeOffset? consentExpires, IReadOnlyList<IntegrationAccountOperator> operators, bool? isSandbox) =>
             string.Concat(
@@ -44,6 +50,10 @@ internal abstract class OpenFinanceTexts
     private sealed class PortugueseOpenFinanceTexts : OpenFinanceTexts
     {
         public override string UnknownAdapter(string adapterId) => $"Este plugin não tem o adaptador '{adapterId}'.";
+
+        public override string NoAdapter(int adapters) => adapters == 0
+            ? "Nenhum adaptador de Open Finance está registrado neste host."
+            : $"A conexão não indica um adaptador e este plugin tem {adapters}; defina o adaptador.";
 
         public override string Connected(DateTimeOffset? lastRefreshed, DateTimeOffset? consentExpires, IReadOnlyList<IntegrationAccountOperator> operators, bool? isSandbox) =>
             string.Concat(

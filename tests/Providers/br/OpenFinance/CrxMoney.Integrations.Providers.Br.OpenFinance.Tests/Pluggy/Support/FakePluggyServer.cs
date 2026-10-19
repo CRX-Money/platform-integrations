@@ -233,13 +233,13 @@ internal sealed class PluggyTestHost : IDisposable
         services.AddHttpClient<PluggyApiClient>().ConfigurePrimaryHttpMessageHandler(() => new NonDisposingHandler(server));
         _services = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
         _scope = _services.CreateScope();
-        Plugin = _scope.ServiceProvider.GetServices<IIntegrationPlugin>().OfType<PluggyIntegrationPlugin>().Single();
+        Plugin = _scope.ServiceProvider.GetServices<IIntegrationPlugin>().OfType<OpenFinanceBrasilIntegrationPlugin>().Single();
     }
 
-    public PluggyIntegrationPlugin Plugin { get; }
+    public OpenFinanceBrasilIntegrationPlugin Plugin { get; }
 
     public static IntegrationSyncRequest Request(long connectionId = 7, string? itemId = FakePluggyServer.ItemId, DateTimeOffset? windowStart = null) =>
-        new(connectionId, PluggyIntegrationPlugin.Id, windowStart, null,
+        new(connectionId, OpenFinanceBrasilIntegrationPlugin.Id, windowStart, null,
             ApiKey: "synthetic-client-id", ApiSecret: "synthetic-client-secret", Passphrase: itemId);
 
     public void Dispose()

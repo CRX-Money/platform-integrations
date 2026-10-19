@@ -22,17 +22,16 @@ internal static class PluggyConnectionSettings
     private static readonly Uri MeuPluggy = new("https://meu.pluggy.ai/");
     private static readonly Uri Dashboard = new("https://dashboard.pluggy.ai/");
 
-    public static IntegrationConnectionSettingsManifest Manifest(string? culture)
+    public static IntegrationConnectionAdapterSettings Adapter(string? culture)
     {
-        var resolved = OpenFinanceTexts.Resolve(culture);
-        var texts = resolved == OpenFinanceTexts.BrazilianPortuguese ? Portuguese : English;
+        var texts = OpenFinanceTexts.Resolve(culture) == OpenFinanceTexts.BrazilianPortuguese ? Portuguese : English;
         IntegrationConnectionSettingsField[] fields =
         [
             new(ClientId, IntegrationCredentialSlot.ApiKey, IsSecret: false, IsRequired: true),
             new(ClientSecret, IntegrationCredentialSlot.ApiSecret, IsSecret: true, IsRequired: true),
             new(ItemId, IntegrationCredentialSlot.Passphrase, IsSecret: false, IsRequired: true),
         ];
-        var adapter = new IntegrationConnectionAdapterSettings(PluggyIntegrationPlugin.AdapterId, "Pluggy", SchemaVersion, JsonSchema(texts), fields)
+        return new IntegrationConnectionAdapterSettings(PluggyAdapter.Name, "Pluggy", SchemaVersion, JsonSchema(texts), fields)
         {
             Walkthrough = new IntegrationConnectionWalkthrough(texts.WalkthroughTitle,
             [
@@ -46,7 +45,6 @@ internal static class PluggyConnectionSettings
                 Note = texts.PlanNote,
             },
         };
-        return new IntegrationConnectionSettingsManifest(PluggyIntegrationPlugin.Id, resolved, [adapter]);
     }
 
     private static string JsonSchema(Texts texts)

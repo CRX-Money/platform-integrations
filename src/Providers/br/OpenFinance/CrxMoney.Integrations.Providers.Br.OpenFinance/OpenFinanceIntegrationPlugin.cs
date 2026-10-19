@@ -32,16 +32,49 @@ public abstract class OpenFinanceIntegrationPlugin
     /// <summary>Days re-sent before the host's window start, for lines the bank books late.</summary>
     public const int OverlapDays = 7;
 
-    private readonly IOpenFinanceSource _source;
+    private readonly IReadOnlyList<IOpenFinanceSource> _sources;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _logger;
 
-    /// <summary>Creates the plugin around its source.</summary>
+    /// <summary>Creates the plugin around a single adapter.</summary>
     protected OpenFinanceIntegrationPlugin(IOpenFinanceSource source, TimeProvider timeProvider, ILogger logger)
+        : this([source], timeProvider, logger)
     {
-        _source = source;
+    }
+
+    /// <summary>Creates the plugin around its adapters; a sync uses the one its request names (<see cref="IntegrationSyncRequest.AdapterId"/>).</summary>
+    /// <exception cref="ArgumentException">Two adapters share a name.</exception>
+    protected OpenFinanceIntegrationPlugin(IEnumerable<IOpenFinanceSource> sources, TimeProvider timeProvider, ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(sources);
+        _sources = [.. sources];
+        if (_sources.GroupBy(s => s.SourceName, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1) is { } duplicate)
+            throw new ArgumentException($"Two Open Finance adapters are named '{duplicate.Key}'.", nameof(sources));
         _timeProvider = timeProvider;
         _logger = logger;
+    }
+
+    /// <summary>The adapters' names (their adapter ids), in registration order.</summary>
+    public IReadOnlyList<string> AdapterIds => [.. _sources.Select(s => s.SourceName)];
+
+    /// <summary>
+    /// The adapter a request names; with no name, the only adapter. Returns the failure message when there is none.
+    /// </summary>
+    private IOpenFinanceSource? SelectSource(string? adapterId, OpenFinanceTexts texts, out string? failure)
+    {
+        failure = null;
+        if (adapterId is null)
+        {
+            if (_sources.Count == 1)
+                return _sources[0];
+            failure = texts.NoAdapter(_sources.Count);
+            return null;
+        }
+
+        var source = _sources.FirstOrDefault(s => string.Equals(s.SourceName, adapterId, StringComparison.Ordinal));
+        if (source is null)
+            failure = texts.UnknownAdapter(adapterId);
+        return source;
     }
 
     /// <inheritdoc />
@@ -59,10 +92,10 @@ public abstract class OpenFinanceIntegrationPlugin
     /// <inheritdoc />
     public IntegrationImportSchemaManifest GetImportSchemaManifest() => OpenFinanceImportSchemas.Manifest;
 
-    /// <summary>The settings of the plugin's adapter(s). A plugin without its own declares none.</summary>
+    /// <summary>The settings each adapter declares, in registration order.</summary>
     /// <inheritdoc />
     public virtual IntegrationConnectionSettingsManifest GetConnectionSettings(string? culture = null) =>
-        new(ProviderId, OpenFinanceTexts.Resolve(culture), []);
+        new(ProviderId, OpenFinanceTexts.Resolve(culture), [.. _sources.Select(s => s.GetConnectionSettings(culture)).OfType<IntegrationConnectionAdapterSettings>()]);
 
     /// <summary>
     /// Checks the settings through the source (<see cref="IOpenFinanceSource.CheckConnectionAsync"/>) and describes
@@ -78,12 +111,12 @@ public abstract class OpenFinanceIntegrationPlugin
     {
         ArgumentNullException.ThrowIfNull(request);
         var texts = OpenFinanceTexts.For(culture);
-        if (!GetConnectionSettings(culture).Adapters.Any(a => string.Equals(a.AdapterId, adapterId, StringComparison.Ordinal)))
-            return IntegrationConnectionTestResult.Failure(IntegrationErrorKind.Configuration, texts.UnknownAdapter(adapterId));
+        if (SelectSource(adapterId, texts, out var failure) is not { } source)
+            return IntegrationConnectionTestResult.Failure(IntegrationErrorKind.Configuration, failure!);
 
         try
         {
-            var check = await _source.CheckConnectionAsync(request, cancellationToken).ConfigureAwait(false);
+            var check = await source.CheckConnectionAsync(request with { AdapterId = adapterId }, cancellationToken).ConfigureAwait(false);
             var operators = check.AccountOperatorCompes
                 .Select(BrazilianInstitutions.Find)
                 .OfType<BrazilianInstitution>()
@@ -110,11 +143,17 @@ public abstract class OpenFinanceIntegrationPlugin
     {
         ArgumentNullException.ThrowIfNull(request);
         var startedAt = _timeProvider.GetUtcNow();
+        if (SelectSource(request.AdapterId, OpenFinanceTexts.For(null), out var failure) is not { } source)
+        {
+            _logger.LogWarning("{Provider} sync for connection {ConnectionId} has no usable adapter: {Reason}", ProviderId, request.ConnectionId, failure);
+            return IntegrationSyncResult.Failure(startedAt, _timeProvider.GetUtcNow(), IntegrationErrorKind.Configuration, failure!);
+        }
+
         try
         {
             return request.ConnectionId <= 0
-                ? await TestAsync(request, startedAt, cancellationToken).ConfigureAwait(false)
-                : await ReadAsync(request, startedAt, cancellationToken).ConfigureAwait(false);
+                ? await TestAsync(source, request, startedAt, cancellationToken).ConfigureAwait(false)
+                : await ReadAsync(source, request, startedAt, cancellationToken).ConfigureAwait(false);
         }
         catch (OpenFinanceSourceException ex)
         {
@@ -131,13 +170,13 @@ public abstract class OpenFinanceIntegrationPlugin
         }
     }
 
-    private async Task<IntegrationSyncResult> TestAsync(IntegrationSyncRequest request, DateTimeOffset startedAt, CancellationToken cancellationToken)
+    private async Task<IntegrationSyncResult> TestAsync(IOpenFinanceSource source, IntegrationSyncRequest request, DateTimeOffset startedAt, CancellationToken cancellationToken)
     {
-        var check = await _source.CheckConnectionAsync(request, cancellationToken).ConfigureAwait(false);
+        var check = await source.CheckConnectionAsync(request, cancellationToken).ConfigureAwait(false);
         var diagnostics = Diagnostics(writer =>
         {
             writer.WriteString("check", "connection");
-            writer.WriteString("source", _source.SourceName);
+            writer.WriteString("source", source.SourceName);
             writer.WriteString("summary", check.Summary);
             if (check.CredentialExpiresAt is { } expiresAt)
                 writer.WriteString("credentialExpiresAtUtc", expiresAt.ToUniversalTime());
@@ -147,10 +186,10 @@ public abstract class OpenFinanceIntegrationPlugin
         return IntegrationSyncResult.Success(startedAt, _timeProvider.GetUtcNow(), 0, 0, 0, providerDiagnosticsJson: diagnostics);
     }
 
-    private async Task<IntegrationSyncResult> ReadAsync(IntegrationSyncRequest request, DateTimeOffset startedAt, CancellationToken cancellationToken)
+    private async Task<IntegrationSyncResult> ReadAsync(IOpenFinanceSource source, IntegrationSyncRequest request, DateTimeOffset startedAt, CancellationToken cancellationToken)
     {
         var sendFrom = SendFrom(request);
-        var snapshot = await _source.ReadAsync(request, sendFrom, cancellationToken).ConfigureAwait(false);
+        var snapshot = await source.ReadAsync(request, sendFrom, cancellationToken).ConfigureAwait(false);
         bool IsSent(DateOnly bookingDate) => sendFrom is not { } from || bookingDate >= from;
 
         // Every posted line and every investment movement the read returned gets its key first: pairing looks at all
@@ -207,7 +246,7 @@ public abstract class OpenFinanceIntegrationPlugin
         var sentPerAccount = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var line in lines.Where(l => l.IsSent))
         {
-            events.Add(OpenFinanceTransactionMapper.Map(line.Account, line.Transaction, line.Ordinal, _source.SourceName, Links(line.Key)));
+            events.Add(OpenFinanceTransactionMapper.Map(line.Account, line.Transaction, line.Ordinal, source.SourceName, Links(line.Key)));
             sentPerAccount[line.Account.ExternalAccountId] = sentPerAccount.GetValueOrDefault(line.Account.ExternalAccountId) + 1;
         }
 
@@ -216,7 +255,7 @@ public abstract class OpenFinanceIntegrationPlugin
             var pair = movement.CashKey is { } cashKey && investmentPairs.OtherToCash.TryGetValue(cashKey, out var cash)
                 ? new OpenFinancePair(cash.ExternalAccountId, cash.Key)
                 : null;
-            var mapped = OpenFinanceInvestmentMapper.Map(movement.Investment, movement.Movement, movement.Ordinal, _source.SourceName, pair);
+            var mapped = OpenFinanceInvestmentMapper.Map(movement.Investment, movement.Movement, movement.Ordinal, source.SourceName, pair);
             events.AddRange(mapped);
             var accountId = movement.Investment.ExternalAccountId;
             sentPerAccount[accountId] = sentPerAccount.GetValueOrDefault(accountId) + mapped.Count;
@@ -247,7 +286,7 @@ public abstract class OpenFinanceIntegrationPlugin
 
         var diagnostics = Diagnostics(writer =>
         {
-            writer.WriteString("source", _source.SourceName);
+            writer.WriteString("source", source.SourceName);
             writer.WriteNumber("events", events.Count);
             writer.WriteNumber("pendingSkipped", pending);
             if (sendFrom is { } from)

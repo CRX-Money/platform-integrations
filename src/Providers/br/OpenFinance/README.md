@@ -16,30 +16,38 @@ dotnet add package CrxMoney.Integrations.Providers.Br.OpenFinance --prerelease
 ```csharp
 using CrxMoney.Integrations.Providers.Br.OpenFinance;
 
-builder.Services.AddOpenFinanceBrasil().AddPluggy();   // one IIntegrationPlugin per adapter
+builder.Services.AddOpenFinanceBrasil().AddPluggy();   // one IIntegrationPlugin, one adapter per aggregator
 ```
 
-| Adapter | Provider id | Adapter id | Plugin class |
-| --- | --- | --- | --- |
-| Pluggy | `Pluggy` | `pluggy` | `CrxMoney.Integrations.Providers.Br.OpenFinance.Pluggy.PluggyIntegrationPlugin` |
+The plugin is `OpenFinanceBrasilIntegrationPlugin`, provider id
+**`Open Finance Brasil`** (the platform's `Integration.Provider` name). Each
+adapter is identified by the aggregator's name, compared exactly (the platform's
+`Integration.Aggregator` name). A sync runs on the adapter named by
+`IntegrationSyncRequest.AdapterId`; when the request names none and the plugin
+has exactly one adapter, that adapter runs.
 
-The provider id `Pluggy` is the one the platform already stores with each
-connection; it is kept so existing connections keep working.
+| Adapter | Adapter id | Registration | Code |
+| --- | --- | --- | --- |
+| Pluggy | `Pluggy` (`PluggyAdapter.Name`) | `.AddPluggy()` | `Pluggy/`, namespace `CrxMoney.Integrations.Providers.Br.OpenFinance.Pluggy` |
 
 ## Moving from `CrxMoney.Integrations.Providers.Br.Pluggy`
 
 This package replaces `CrxMoney.Integrations.Providers.Br.Pluggy`, which stays at
 `1.0.0-preview.4` and receives no further versions. Idempotency keys, external
-account ids, provider data, schema ids and the provider id are unchanged, so
-existing imports and account maps carry over. A host changes:
+account ids, provider data (its `provider` is still `Pluggy`, the aggregator) and
+schema ids are unchanged, so existing imports and account maps carry over. The
+provider id changes from `Pluggy` (the aggregator) to `Open Finance Brasil` (the
+provider). A host changes:
 
 | Before | After |
 | --- | --- |
 | package `CrxMoney.Integrations.Providers.Br.Pluggy` | package `CrxMoney.Integrations.Providers.Br.OpenFinance` |
 | `services.AddPluggyIntegration(baseAddress)` | `services.AddOpenFinanceBrasil().AddPluggy(baseAddress)` |
-| `using CrxMoney.Integrations.Providers.Br.Pluggy;` | `using CrxMoney.Integrations.Providers.Br.OpenFinance;` (and `.Pluggy` for `PluggyIntegrationPlugin`) |
+| `using CrxMoney.Integrations.Providers.Br.Pluggy;` | `using CrxMoney.Integrations.Providers.Br.OpenFinance;` (and `.Pluggy` for `PluggyAdapter`) |
+| `PluggyIntegrationPlugin` / `PluggyIntegrationPlugin.Id` (`"Pluggy"`) | `OpenFinanceBrasilIntegrationPlugin` / `OpenFinanceBrasilIntegrationPlugin.Id` (`"Open Finance Brasil"`) |
+| — | `IntegrationSyncRequest.AdapterId = "Pluggy"` (optional while Pluggy is the only adapter) |
 | `CrxMoney.Integrations.Countries.Br.OpenFinance.*` | `CrxMoney.Integrations.Providers.Br.OpenFinance.*` |
-| `PluggyServiceCollectionExtensions.DefaultBaseAddress` | `PluggyIntegrationPlugin.DefaultBaseAddress` |
+| `PluggyServiceCollectionExtensions.DefaultBaseAddress` | `PluggyAdapter.DefaultBaseAddress` |
 | `CrxMoney.Integrations.Countries.Br.OpenFinance.BrazilianInstitutions` | `CrxMoney.Integrations.Countries.Br.BrazilianInstitutions` |
 
 ## Connection settings
@@ -203,8 +211,10 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
    every movement, the best institution-side identity available, and expenses
    split into income tax, IOF and other fees. Throw `OpenFinanceSourceException`
    with an `IntegrationErrorKind` for expected failures.
-2. Subclass `OpenFinanceIntegrationPlugin` with its provider id, override `GetConnectionSettings` with the
-   adapter's settings schema, and add an `Add<Aggregator>()` extension on `OpenFinanceBrasilBuilder`.
+2. Name it after the aggregator (`SourceName`: the adapter id and the `provider` in provider data), return
+   its settings schema from `GetConnectionSettings`, and add an `Add<Aggregator>()` extension on
+   `OpenFinanceBrasilBuilder` that registers it as an `IOpenFinanceSource`. The one
+   `OpenFinanceBrasilIntegrationPlugin` picks it up.
 3. Test the normalisation against synthetic fixtures in the aggregator's shape, and
    check that the keys for the shared fixture lines match the existing aggregator's.
 

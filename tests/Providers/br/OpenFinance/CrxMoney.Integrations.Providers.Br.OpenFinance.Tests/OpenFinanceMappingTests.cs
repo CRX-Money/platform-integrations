@@ -243,6 +243,38 @@ public sealed class OpenFinanceMappingTests
         Assert.NotNull(diagnostics["credentialExpiresAtUtc"]);
     }
 
+    [Fact]
+    public async Task With_several_adapters_a_sync_runs_on_the_one_its_request_names()
+    {
+        var plugin = new MultiPlugin([new FakeSource("A", Checking, [Line("a-1", OpenFinanceDirection.Credit, 1m)]), new FakeSource("B", Checking, [Line("b-1", OpenFinanceDirection.Credit, 1m)])]);
+        var request = new IntegrationSyncRequest(42, "Any", null, null);
+
+        var onB = await plugin.SyncAsync(request with { AdapterId = "B" }, TestContext.Current.CancellationToken);
+        var unnamed = await plugin.SyncAsync(request, TestContext.Current.CancellationToken);
+        var test = await plugin.TestConnectionAsync("A", request with { ConnectionId = 0 }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(["A", "B"], plugin.AdapterIds);
+        Assert.Equal(["b-1"], onB.ImportEvents.Select(e => e.ExternalId));
+        Assert.Equal("B", JsonNode.Parse(onB.ImportEvents[0].ProviderData!)!["provider"]!.GetValue<string>());
+        Assert.Equal(IntegrationErrorKind.Configuration, unnamed.ErrorKind);
+        Assert.Contains("has 2", unnamed.ErrorMessage, StringComparison.Ordinal);
+        Assert.True(test.Succeeded);
+        Assert.Empty(plugin.GetConnectionSettings().Adapters); // these fake adapters declare no settings
+    }
+
+    [Fact]
+    public void Two_adapters_with_one_name_are_refused()
+    {
+        Assert.Throws<ArgumentException>(() => new MultiPlugin([new FakeSource("A", Checking, []), new FakeSource("A", Checking, [])]));
+    }
+
+    private sealed class MultiPlugin(IEnumerable<IOpenFinanceSource> sources) : OpenFinanceIntegrationPlugin(sources, TimeProvider.System, NullLogger.Instance)
+    {
+        public override string ProviderId => "Test";
+
+        public override string DisplayName => "Test";
+    }
+
     private sealed class TestPlugin(IOpenFinanceSource source) : OpenFinanceIntegrationPlugin(source, TimeProvider.System, NullLogger.Instance)
     {
         public override string ProviderId => "Test";

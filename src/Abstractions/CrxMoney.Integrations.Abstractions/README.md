@@ -22,7 +22,7 @@ dotnet add package CrxMoney.Integrations.Abstractions --prerelease
 | `IIntegrationImportSchemaManifestProvider`, `IntegrationImportSchemaManifest`, `IntegrationImportSchemaManifestItem` | `.Plugins` | Optional: declare the JSON schemas used in `ProviderData`. |
 | `IIntegrationConnectionSettingsProvider`, `IntegrationConnectionSettingsManifest`, `IntegrationConnectionAdapterSettings`, `IntegrationConnectionSettingsField`, `IntegrationCredentialSlot`, `IntegrationConnectionWalkthrough` | `.Plugins` | Optional: declare each adapter's connection settings as a JSON Schema, with walkthrough text. |
 | `IIntegrationConnectionTester`, `IntegrationConnectionTestResult`, `IntegrationAccountOperator` | `.Plugins` | Optional: check settings before they are saved and describe the result in provider-neutral terms. |
-| `IntegrationSyncRequest` | `.Sync` | Input to one run: connection id, window, previous checkpoints, resolved credentials. |
+| `IntegrationSyncRequest` | `.Sync` | Input to one run: connection id, window, previous checkpoints, resolved credentials, and the optional `AdapterId`. |
 | `IntegrationSyncResult` | `.Sync` | Output of one run; build it with `Success(...)` or `Failure(...)`. |
 | `IntegrationImportEvent` | `.Sync` | The canonical, idempotent movement every provider folds into. |
 | `IntegrationCheckpoint` | `.Sync` | A resume cursor per resource, persisted by the host. |
@@ -78,8 +78,10 @@ host. `IIntegrationConnectionSettingsProvider.GetConnectionSettings(culture)`
 returns one `IntegrationConnectionAdapterSettings` per adapter (the code for one
 aggregator or channel inside the plugin):
 
-- `AdapterId`: stable, lower-case, unique in the plugin; the host stores it with
-  the connection.
+- `AdapterId`: stable, unique in the plugin and compared exactly; by
+  convention the aggregator's name (`Pluggy`). The host stores it with the
+  connection and passes it back on every run in `IntegrationSyncRequest.AdapterId`
+  (optional and init-only; `null` lets a plugin with one adapter use that one).
 - `JsonSchema`: a JSON Schema (draft 2020-12) for the settings object. Each
   property has `type`, `title`, `description`, and `format`/`pattern` where useful;
   secrets carry `writeOnly: true`; `required` lists the mandatory fields. No

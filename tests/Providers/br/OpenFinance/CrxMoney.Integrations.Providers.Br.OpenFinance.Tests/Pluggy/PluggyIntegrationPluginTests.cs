@@ -25,7 +25,8 @@ public sealed class PluggyIntegrationPluginTests
     {
         using var host = new PluggyTestHost(FakePluggyServer.WithFixtures());
 
-        Assert.Equal("Pluggy", host.Plugin.ProviderId);
+        Assert.Equal("Open Finance Brasil", host.Plugin.ProviderId);
+        Assert.Equal(["Pluggy"], host.Plugin.AdapterIds);
         Assert.Equal(IntegrationCapability.Transfers, host.Plugin.Capabilities);
         Assert.Equal(
             [OpenFinanceImportSchemas.DepositSchemaId, OpenFinanceImportSchemas.WithdrawalSchemaId,

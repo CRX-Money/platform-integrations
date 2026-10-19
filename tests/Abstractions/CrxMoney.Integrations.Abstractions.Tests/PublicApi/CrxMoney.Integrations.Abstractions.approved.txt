@@ -208,6 +208,7 @@ namespace CrxMoney.Integrations.Abstractions.Sync
     public sealed class IntegrationSyncRequest : System.IEquatable<CrxMoney.Integrations.Abstractions.Sync.IntegrationSyncRequest>
     {
         public IntegrationSyncRequest(long ConnectionId, string ProviderId, System.DateTimeOffset? WindowStartUtc, System.DateTimeOffset? WindowEndUtc, string? CorrelationId = null, string? PreviousCheckpoint = null, System.Collections.Generic.IReadOnlyList<string>? TenantTrackedAssetCodes = null, string? ApiKey = null, string? ApiSecret = null, string? Passphrase = null, System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Sync.IntegrationCheckpoint>? PreviousCheckpoints = null) { }
+        public string? AdapterId { get; init; }
         public string? ApiKey { get; init; }
         public string? ApiSecret { get; init; }
         public long ConnectionId { get; init; }

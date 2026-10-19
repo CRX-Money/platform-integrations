@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using CrxMoney.Integrations.Abstractions.Plugins;
 using CrxMoney.Integrations.Abstractions.Sync;
 using CrxMoney.Integrations.Countries.Br;
 using CrxMoney.Integrations.Providers.Br.OpenFinance;
@@ -16,7 +17,9 @@ namespace CrxMoney.Integrations.Providers.Br.OpenFinance.Pluggy;
 /// </summary>
 internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider timeProvider) : IOpenFinanceSource
 {
-    public string SourceName => "Pluggy";
+    public string SourceName => PluggyAdapter.Name;
+
+    public IntegrationConnectionAdapterSettings? GetConnectionSettings(string? culture) => PluggyConnectionSettings.Adapter(culture);
 
     public async Task<OpenFinanceConnectionCheck> CheckConnectionAsync(IntegrationSyncRequest request, CancellationToken cancellationToken)
     {

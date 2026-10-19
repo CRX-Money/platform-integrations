@@ -15,7 +15,9 @@ dotnet add package CrxMoney.Integrations.Providers.Br.OpenFinance --prerelease
 services.AddOpenFinanceBrasil().AddPluggy();
 ```
 
-Idempotency keys, external account ids, provider data, schema ids and the
-provider id `Pluggy` are unchanged, so nothing is imported twice. The full list
-of renamed namespaces is in the
+Idempotency keys, external account ids, provider data and schema ids are
+unchanged, so nothing is imported twice. The provider id is now
+`Open Finance Brasil`, and `Pluggy` is the adapter id
+(`IntegrationSyncRequest.AdapterId`). The full list of renamed types and
+namespaces is in the
 [new package's README](../OpenFinance/README.md#moving-from-crxmoneyintegrationsprovidersbrpluggy).

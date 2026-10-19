@@ -28,8 +28,11 @@ public sealed class PluggyLiveProbeTests
 
         using var services = BuildServices();
         using var scope = services.CreateScope();
-        var plugin = scope.ServiceProvider.GetServices<IIntegrationPlugin>().OfType<PluggyIntegrationPlugin>().Single();
-        var request = new IntegrationSyncRequest(1, PluggyIntegrationPlugin.Id, null, null, ApiKey: clientId, ApiSecret: clientSecret, Passphrase: itemId);
+        var plugin = scope.ServiceProvider.GetServices<IIntegrationPlugin>().OfType<OpenFinanceBrasilIntegrationPlugin>().Single();
+        var request = new IntegrationSyncRequest(1, OpenFinanceBrasilIntegrationPlugin.Id, null, null, ApiKey: clientId, ApiSecret: clientSecret, Passphrase: itemId)
+        {
+            AdapterId = PluggyAdapter.Name,
+        };
         var ct = TestContext.Current.CancellationToken;
 
         var test = await plugin.SyncAsync(request with { ConnectionId = 0 }, ct);

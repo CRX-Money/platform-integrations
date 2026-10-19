@@ -119,6 +119,15 @@ public sealed class ContractBehaviourTests
     }
 
     [Fact]
+    public void A_sync_request_names_no_adapter_unless_the_host_sets_one()
+    {
+        var request = new IntegrationSyncRequest(1, "provider", null, null);
+
+        Assert.Null(request.AdapterId);
+        Assert.Equal("adapter", (request with { AdapterId = "adapter" }).AdapterId);
+    }
+
+    [Fact]
     public void The_connection_settings_contract_is_optional()
     {
         IIntegrationPlugin plugin = new MinimalPlugin();
