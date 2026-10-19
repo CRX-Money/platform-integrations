@@ -56,6 +56,12 @@ public sealed record OpenFinanceAccount(
     /// </summary>
     public OpenFinanceCardBalance? Card { get; init; }
 
+    /// <summary>The COMPE code of the institution holding the account: the bank of a deposit account, the issuer of a card.</summary>
+    public string? InstitutionCompe => Kind == OpenFinanceAccountKind.Deposit ? BankAccount?.Compe : IssuerCompe;
+
+    /// <summary>The institution's official website from <see cref="BrazilianInstitutions"/>, when its code is listed.</summary>
+    public string? InstitutionWebsite => BrazilianInstitutions.WebsiteOf(InstitutionCompe);
+
     /// <summary>The platform's external account id for this account; independent of the aggregator.</summary>
     /// <exception cref="OpenFinanceIdentityException">The account lacks the identity its kind requires.</exception>
     public string ExternalAccountId => Kind switch

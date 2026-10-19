@@ -67,6 +67,9 @@ accounts needs Pluggy's commercial plan or another aggregator.
   later than that is recovered by a full-history sync; the keys make it safe.
 - The deposit account's `balance` is reported in the run diagnostics with
   `balanceAtUtc`, the item's `lastUpdatedAt` (Pluggy's last refresh from the bank).
+  Rows and events also carry `institutionWebsite` from the country package's
+  institution list (by the COMPE of `bankData.transferNumber`); the adapter adds
+  nothing of its own for it.
 - `GET /investments?itemId=&page=` (page numbers, 500 per page, Pluggy's default)
   when the item has the `INVESTMENTS` product, and
   `GET /investments/{id}/transactions?page=` for each position when it also has

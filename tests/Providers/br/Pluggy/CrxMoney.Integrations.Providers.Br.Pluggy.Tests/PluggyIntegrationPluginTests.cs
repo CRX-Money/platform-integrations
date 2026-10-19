@@ -93,12 +93,16 @@ public sealed class PluggyIntegrationPluginTests
 
         // The preview.4 keys keep their names and order; new keys only follow them.
         Assert.Equal(
-            ["kind", "externalAccountId", "lines", "posted", "sent", "balance", "balanceAtUtc", "balanceSide"],
+            ["kind", "externalAccountId", "lines", "posted", "sent", "balance", "balanceAtUtc", "balanceSide", "institutionWebsite"],
             bank.AsObject().Select(p => p.Key));
         Assert.Equal(
             ["kind", "externalAccountId", "lines", "posted", "sent", "balance", "balanceAtUtc", "balanceSide",
-             "pendingAmount", "pendingLines", "balanceWithPending", "creditLimit", "availableCreditLimit", "minimumPayment", "billCloseDate", "billDueDate"],
+             "pendingAmount", "pendingLines", "balanceWithPending", "creditLimit", "availableCreditLimit", "minimumPayment", "billCloseDate", "billDueDate",
+             "institutionWebsite"],
             card.AsObject().Select(p => p.Key));
+        // COMPE 077 is in the package's institution list; the card's issuer is the item's bank.
+        Assert.Equal("https://inter.co/", bank["institutionWebsite"]!.GetValue<string>());
+        Assert.Equal("https://inter.co/", card["institutionWebsite"]!.GetValue<string>());
     }
 
     [Fact]

@@ -16,6 +16,7 @@ dotnet add package CrxMoney.Integrations.Countries.Br --prerelease
 | `BrazilianBankAccount` | A deposit account as the banks identify it: COMPE + branch + account with check digit. `ExternalAccountId` is `br:{compe}:{branch}:{number}`; cards are `br:{compe}:card:{last4}`; investment positions are `br:{compe}:inv:{basis}:{key}`. |
 | `BrazilBankingCalendar` | São Paulo booking dates; imports are dated at midnight of the booking date (`2026-03-10T00:00-03:00`). |
 | `OpenFinance.*` | The aggregator-neutral Open Finance model and the plugin every aggregator shares (below). |
+| `OpenFinance.BrazilianInstitutions` | The package's institution list: COMPE code to display name and official website (below). |
 
 Pix key types and ISPB formatting will be added here when a provider needs them.
 
@@ -102,6 +103,12 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   same rule: the source returns all of them and the plugin sends those booked from
   the same date. The checkpoint `transactions` holds the latest booking date of an
   account line read, and never moves back when a window reads nothing new.
+- **Institution website.** Every account row, position row and import event
+  carries `institutionWebsite` when the account's COMPE code (the bank of a
+  deposit account, the issuer of a card, the institution holding a position) is in
+  the institution list; otherwise the field is absent. The code always stays in
+  the external id. The host matches the website's host to the workspace's account
+  operator, so no Brazilian bank code has to live in the platform's database.
 - **Run diagnostics** (the provider block the host shows per run): `source`,
   `events`, `pendingSkipped`, `sentFrom` (absent on a full read),
   `credentialExpiresAtUtc`, `accounts`, `transferPairs` and `sourceDiagnostics`.
@@ -132,6 +139,59 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   `ambiguous`, `unmatched`, `positionSideUnpaired`: cash-moving investment events
   with no checking line) and `cardBillPayment` (`lines`: checking-side bill
   payments, `paired`, `ambiguous`, `unmatched`, `cardSideUnpaired`).
+
+### Institution list
+
+`OpenFinance/Data/br-institutions.json` ships inside the package as an embedded
+resource and is read through `BrazilianInstitutions.Find(compe)` /
+`WebsiteOf(compe)`. Each entry holds `compe`, `ispb`, `name` (display name),
+`legalName` and `website` (a canonical `https://host/` URL). COMPE codes, ISPB
+and legal names come from the Banco Central do Brasil's list of STR participants,
+[ParticipantesSTR.csv](https://www.bcb.gov.br/content/estabilidadefinanceira/str1/ParticipantesSTR.csv)
+(retrieved 2026-10-19). Each website was opened on the institution's own site.
+An institution is listed only when both checks passed.
+
+| COMPE | Institution | Website |
+| --- | --- | --- |
+| 001 | Banco do Brasil | https://www.bb.com.br/ |
+| 021 | Banestes | https://www.banestes.com.br/ |
+| 033 | Santander | https://www.santander.com.br/ |
+| 041 | Banrisul | https://www.banrisul.com.br/ |
+| 070 | BRB | https://www.brb.com.br/ |
+| 077 | Inter | https://inter.co/ |
+| 102 | XP Investimentos | https://www.xpi.com.br/ |
+| 104 | Caixa | https://www.caixa.gov.br/ |
+| 121 | Agibank | https://agibank.com.br/ |
+| 136 | Unicred | https://www.unicred.com.br/ |
+| 197 | Stone | https://www.stone.com.br/ |
+| 208 | BTG Pactual | https://www.btgpactual.com/ |
+| 212 | Banco Original | https://www.original.com.br/ |
+| 237 | Bradesco | https://banco.bradesco/ |
+| 260 | Nubank | https://nubank.com.br/ |
+| 290 | PagBank | https://pagbank.com.br/ |
+| 318 | Banco BMG | https://www.bancobmg.com.br/ |
+| 323 | Mercado Pago | https://www.mercadopago.com.br/ |
+| 336 | C6 Bank | https://www.c6bank.com.br/ |
+| 341 | Itaú | https://www.itau.com.br/ |
+| 380 | PicPay | https://picpay.com/ |
+| 403 | Cora | https://www.cora.com.br/ |
+| 422 | Safra | https://www.safra.com.br/ |
+| 623 | Banco Pan | https://www.bancopan.com.br/ |
+| 637 | Sofisa | https://www.sofisa.com.br/ |
+| 707 | Daycoval | https://www.daycoval.com.br/ |
+| 748 | Sicredi | https://www.sicredi.com.br/ |
+| 756 | Sicoob | https://www.sicoob.com.br/ |
+
+Notes:
+
+- Sicredi (748) and Sicoob (756) are the cooperative banks; a local
+  cooperative's own code is not listed and gets no website.
+- Nubank accounts are held by Nu Pagamentos (260).
+- XP is listed by its brokerage, XP Investimentos (102). Banco XP (348) is left
+  out because no site of its own could be confirmed.
+- To add an entry, take the code, ISPB and legal name from the Banco Central file,
+  open the institution's own site, and keep the list sorted by code. A test checks
+  every entry's format.
 
 ### Adding an aggregator
 

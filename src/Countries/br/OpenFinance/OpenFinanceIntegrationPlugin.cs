@@ -277,6 +277,7 @@ public abstract class OpenFinanceIntegrationPlugin : IIntegrationPlugin, IIntegr
             WriteOptionalDate(writer, "billDueDate", card.BillDueDate);
         }
 
+        WriteOptionalString(writer, "institutionWebsite", account.InstitutionWebsite);
         writer.WriteEndObject();
     }
 
@@ -306,6 +307,7 @@ public abstract class OpenFinanceIntegrationPlugin : IIntegrationPlugin, IIntegr
         WriteOptionalNumber(writer, "financialTax", investment.FinancialTax);
         WriteOptionalDate(writer, "issueDate", investment.IssueDate);
         WriteOptionalDate(writer, "dueDate", investment.DueDate);
+        WriteOptionalString(writer, "institutionWebsite", investment.InstitutionWebsite);
         writer.WriteEndObject();
     }
 

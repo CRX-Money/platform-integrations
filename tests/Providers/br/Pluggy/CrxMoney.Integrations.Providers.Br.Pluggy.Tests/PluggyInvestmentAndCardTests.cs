@@ -122,6 +122,9 @@ public sealed class PluggyInvestmentAndCardTests
         Assert.Equal("application", Data(application)["operation"]!.GetValue<string>());
         Assert.Equal("investment", Data(application)["transferHint"]!.GetValue<string>());
         Assert.Equal("CDB", Data(application)["investment"]!["subtype"]!.GetValue<string>());
+        Assert.Equal("https://inter.co/", Data(application)["institutionWebsite"]!.GetValue<string>());
+        Assert.Equal("https://inter.co/", Row(result, CdbKey)["institutionWebsite"]!.GetValue<string>());
+        Assert.All(result.ImportEvents, e => Assert.Equal("https://inter.co/", Data(e)["institutionWebsite"]!.GetValue<string>()));
 
         // The redemption reaches checking net of IR and IOF; the taxes are their own withdrawals.
         var redemption = events["00000000-0000-4000-8000-000000000a02"];

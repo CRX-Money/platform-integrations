@@ -215,6 +215,7 @@ public static class OpenFinanceInvestmentMapper
             if (movement.SettlementTime is { } settled)
                 writer.WriteString("settlementTime", settled.ToUniversalTime());
             writer.WriteString("accountKind", "investment");
+            WriteOptional(writer, "institutionWebsite", investment.InstitutionWebsite);
             writer.WriteString("operation", OperationName(movement.Operation));
             if (component is not null)
             {

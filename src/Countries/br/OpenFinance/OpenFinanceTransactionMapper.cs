@@ -165,6 +165,7 @@ public static class OpenFinanceTransactionMapper
             writer.WriteString("transactionTime", transaction.TransactionTime.ToUniversalTime());
             writer.WriteString("transactionDate", transaction.BookingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             writer.WriteString("accountKind", account.Kind == OpenFinanceAccountKind.CreditCard ? "creditCard" : "deposit");
+            WriteOptional(writer, "institutionWebsite", account.InstitutionWebsite);
             writer.WriteString("type", transaction.Type);
             WriteOptional(writer, "typeDetail", transaction.TypeDetail);
             WriteOptional(writer, "description", transaction.Description);
@@ -329,6 +330,7 @@ public static class OpenFinanceImportSchemas
             "transactionTime": { "type": "string", "format": "date-time" },
             "transactionDate": { "type": "string", "format": "date", "description": "Booking date, Brazilian calendar" },
             "accountKind": { "enum": ["deposit", "creditCard"] },
+            "institutionWebsite": { "type": "string", "format": "uri", "description": "Official website of the account's institution, when its COMPE code is in the package's institution list" },
             "type": { "type": "string", "description": "PIX, TED, BOLETO, CARD, OUTROS, ..." },
             "typeDetail": { "type": "string" },
             "description": { "type": "string" },
@@ -390,6 +392,7 @@ public static class OpenFinanceImportSchemas
             "movementDate": { "type": "string", "format": "date", "description": "Booking date, Brazilian calendar" },
             "settlementTime": { "type": "string", "format": "date-time" },
             "accountKind": { "const": "investment" },
+            "institutionWebsite": { "type": "string", "format": "uri", "description": "Official website of the institution holding the position, when its COMPE code is in the package's institution list" },
             "operation": { "enum": ["application", "redemption", "amortization", "income", "tax", "transferIn", "transferOut"] },
             "component": { "enum": ["incomeTax", "iof", "fee", "payout"], "description": "Absent on the movement's main event" },
             "parentIdempotencyKey": { "type": "string", "description": "The main event of a component" },

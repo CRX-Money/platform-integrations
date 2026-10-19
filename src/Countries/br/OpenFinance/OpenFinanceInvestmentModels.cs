@@ -99,6 +99,9 @@ public sealed record OpenFinanceInvestment(
     /// <summary>The aggregator's raw position, kept verbatim in provider data.</summary>
     public JsonElement SourcePayload { get; init; }
 
+    /// <summary>The official website of the institution holding the position, when its code is listed (<see cref="BrazilianInstitutions"/>).</summary>
+    public string? InstitutionWebsite => BrazilianInstitutions.WebsiteOf(InstitutionCompe);
+
     /// <summary>The platform's external account id for the position: <c>br:{compe}:inv:{basis}:{key}</c>.</summary>
     /// <exception cref="OpenFinanceIdentityException">The identity is empty.</exception>
     public string ExternalAccountId
