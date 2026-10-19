@@ -16,9 +16,17 @@ public interface IOpenFinanceSource
     /// <exception cref="OpenFinanceSourceException">An expected failure: bad credentials, consent problems, upstream errors.</exception>
     Task<OpenFinanceConnectionCheck> CheckConnectionAsync(IntegrationSyncRequest request, CancellationToken cancellationToken);
 
-    /// <summary>Reads every account of the connection with its transactions.</summary>
+    /// <summary>Reads every account of the connection with its transactions from <paramref name="readFrom"/> on.</summary>
+    /// <param name="request">The host's request.</param>
+    /// <param name="readFrom">
+    /// The first booking date (Brazil's calendar) the plugin will send, or <c>null</c> for the full history.
+    /// A source must return <b>every</b> posted line booked on or after it and may return earlier lines too
+    /// (the plugin drops them). Lines that share a key identity also share their booking date, so a read that
+    /// starts at a whole date numbers them exactly as a full read does and the keys stay the same.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the read.</param>
     /// <exception cref="OpenFinanceSourceException">An expected failure: bad credentials, consent problems, upstream errors.</exception>
-    Task<OpenFinanceSnapshot> ReadAsync(IntegrationSyncRequest request, CancellationToken cancellationToken);
+    Task<OpenFinanceSnapshot> ReadAsync(IntegrationSyncRequest request, DateOnly? readFrom, CancellationToken cancellationToken);
 }
 
 /// <summary>An expected source failure. <see cref="Exception.Message"/> is safe to show: no secrets, no personal data.</summary>

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using CrxMoney.Integrations.Abstractions.Sync;
@@ -28,7 +29,21 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
         return new OpenFinanceConnectionCheck(summary, item.ConsentExpiresAt, ItemDiagnostics(item));
     }
 
-    public async Task<OpenFinanceSnapshot> ReadAsync(IntegrationSyncRequest request, CancellationToken cancellationToken)
+    /// <summary>
+    /// Days requested before the plugin's read date. Pluggy filters <c>dateFrom</c> on its own <c>date</c> field,
+    /// which is a UTC instant (card lines: midnight in Brazil, 03:00Z), while the plugin works in Brazil's
+    /// calendar from <c>creditCardMetadata.transactionDateTime</c> when present. One day more covers both
+    /// readings; the plugin drops the extra lines.
+    /// </summary>
+    internal const int DateFromMarginDays = 1;
+
+    /// <remarks>
+    /// The window is <c>dateFrom</c>, by transaction date, not <c>createdAtFrom</c>, by when Pluggy stored the line:
+    /// a date window always holds every line of a booking date, so lines that are identical but for their ordinal
+    /// are numbered as in a full read and keep their keys. A <c>createdAtFrom</c> read can hold only the later of two
+    /// identical lines, which would then take the first one's key and be dropped by the host as a duplicate.
+    /// </remarks>
+    public async Task<OpenFinanceSnapshot> ReadAsync(IntegrationSyncRequest request, DateOnly? readFrom, CancellationToken cancellationToken)
     {
         var (credentials, itemId) = ParseCredentials(request);
         var item = await api.GetItemAsync(credentials, itemId, cancellationToken).ConfigureAwait(false);
@@ -43,15 +58,25 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
         // An item belongs to one holder; its bank account carries the holder's CPF/CNPJ.
         var holder = bankAccounts.Select(a => BrazilianTaxId.TryParse(a.TaxNumber)).FirstOrDefault(t => t is not null);
 
+        DateOnly? dateFrom = readFrom?.AddDays(-DateFromMarginDays);
         var result = new List<OpenFinanceAccountTransactions>();
+        var pages = 0;
         foreach (var account in accounts)
         {
-            var normalized = NormalizeAccount(account, issuerCompe) with { HolderTaxId = holder };
-            var lines = await api.GetAllTransactionsAsync(credentials, account.Id!, cancellationToken).ConfigureAwait(false);
-            result.Add(new OpenFinanceAccountTransactions(normalized, lines.Select(l => NormalizeTransaction(normalized, l)).ToList()));
+            var normalized = NormalizeAccount(account, issuerCompe);
+            // The balance is as of Pluggy's last refresh of the item from the bank.
+            normalized = normalized with { HolderTaxId = holder, BalanceAt = normalized.Balance is null ? null : item.LastUpdatedAt };
+            var read = await api.GetTransactionsAsync(credentials, account.Id!, dateFrom, cancellationToken).ConfigureAwait(false);
+            pages += read.Pages;
+            result.Add(new OpenFinanceAccountTransactions(normalized, read.Lines.Select(l => NormalizeTransaction(normalized, l)).ToList()));
         }
 
-        return new OpenFinanceSnapshot(result, item.ConsentExpiresAt, ItemDiagnostics(item));
+        return new OpenFinanceSnapshot(result, item.ConsentExpiresAt, ItemDiagnostics(item, writer =>
+        {
+            if (dateFrom is { } from)
+                writer.WriteString("transactionsDateFrom", from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            writer.WriteNumber("transactionPages", pages);
+        }));
     }
 
     internal static (PluggyCredentials Credentials, Guid ItemId) ParseCredentials(IntegrationSyncRequest request)
@@ -113,7 +138,7 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
                         "Pluggy returned a card that cannot be identified (no last four digits, or no deposit account of the same bank in the item).");
                 }
 
-                // Pluggy reports a card's balance as the amount owed; the reconciliation check covers deposit accounts only.
+                // Pluggy reports a card's balance as the amount owed, pending purchases included; only deposit balances are reported.
                 return new OpenFinanceAccount(account.Id, OpenFinanceAccountKind.CreditCard, null, issuerCompe, last4[^4..], currency, null);
             default:
                 throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy returned an account of unknown type '{account.Type}'.");
@@ -209,7 +234,7 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
     private static string? FirstNonEmpty(params string?[] values) =>
         values.Select(v => v?.Trim()).FirstOrDefault(v => !string.IsNullOrEmpty(v));
 
-    private static string ItemDiagnostics(PluggyItem item)
+    private static string ItemDiagnostics(PluggyItem item, Action<Utf8JsonWriter>? readFacts = null)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -224,6 +249,7 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
             if (item.Connector?.IsSandbox is { } isSandbox)
                 writer.WriteBoolean("isSandbox", isSandbox);
             writer.WriteString("products", string.Join(',', item.Products ?? []));
+            readFacts?.Invoke(writer);
             writer.WriteEndObject();
         }
 

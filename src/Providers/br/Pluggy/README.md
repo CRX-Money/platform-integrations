@@ -46,10 +46,26 @@ accounts needs Pluggy's commercial plan or another aggregator.
   `bankData.transferNumber` (`COMPE/branch/account-digit`), `CREDIT` cards by their
   last four digits and the COMPE of the item's bank account. An account that cannot
   be identified fails the sync instead of being guessed.
-- `GET /v2/transactions?accountId=` page by page through the `next` cursor. The
-  endpoint accepts no date filter, so every sync reads the full history and the
-  shared plugin sends only recent lines. A cursor is only ever followed on the
+- `GET /v2/transactions?accountId=&dateFrom=` page by page (500 lines, Pluggy's
+  default). `dateFrom` is one day before the first booking date the shared plugin
+  sends (seven days before the host's window start); the extra day covers Pluggy
+  filtering on its own UTC `date` while the plugin dates lines in Brazil's
+  calendar. A full-history sync (no window start) sends no `dateFrom`. Each
+  response's `next` (`?accountId=…&after=…`) is reduced to its `after` cursor and
+  the next page is requested with the same account and `dateFrom`, always on the
   Pluggy host.
+
+  **Why `dateFrom` and not `createdAtFrom`.** `createdAtFrom` (when Pluggy stored
+  the line) would also catch a line Pluggy detects late with an older date, but it
+  can return only the later of two identical lines (same second, direction and
+  amount). That line would then get ordinal 0, the first line's key, and the host
+  would drop it as a duplicate. A `dateFrom` window always holds every line of a
+  booking date, so ordinals and keys match a full read. Lines booked up to seven
+  days before the window start are re-read on every sync. A line Pluggy reports
+  later than that is recovered by a full-history sync; the keys make it safe.
+- The deposit account's `balance` is reported in the run diagnostics with
+  `balanceAtUtc`, the item's `lastUpdatedAt` (Pluggy's last refresh from the bank).
+  Card balances are not reported: Pluggy's card balance includes pending purchases.
 
 Normalisation into the Open Finance model:
 
@@ -73,9 +89,8 @@ Normalisation into the Open Finance model:
 - Investment positions (`/investments`) and identity pre-fill (`/identity`) are not
   read yet.
 - Pluggy categories are not imported; CRX•Money rules decide.
-- `/v2/transactions` has no date filter, so every sync downloads the account's full
-  history (the plugin sends only recent lines). Stopping early would need Pluggy to
-  document its page order.
+- Paging past 500 lines has been tested against the in-memory fake only: the lab
+  accounts hold fewer lines than one page.
 
 ## Tests
 

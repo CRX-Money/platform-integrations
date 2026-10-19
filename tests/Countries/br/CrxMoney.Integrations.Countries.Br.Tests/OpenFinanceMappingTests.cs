@@ -169,15 +169,51 @@ public sealed class OpenFinanceMappingTests
         var old = Line("old", OpenFinanceDirection.Credit, 1m, new DateTimeOffset(2026, 1, 5, 12, 0, 0, TimeSpan.Zero));
         var recent = Line("recent", OpenFinanceDirection.Credit, 2m);
         var pending = Line("pending", OpenFinanceDirection.Debit, 3m, pending: true);
-        var plugin = new TestPlugin(new FakeSource("A", Checking with { Balance = 3m }, [old, recent, pending]));
+        var source = new FakeSource("A", Checking with { Balance = 3m, BalanceAt = Noon }, [old, recent, pending]);
+        var plugin = new TestPlugin(source);
 
         var result = await plugin.SyncAsync(new IntegrationSyncRequest(42, "Any", Noon.AddDays(-1), Noon), TestContext.Current.CancellationToken);
 
+        // The source is asked from seven days before the window's first Brazilian date (9 Sep).
+        Assert.Equal(new DateOnly(2026, 9, 2), source.ReadFrom);
         Assert.Equal(["recent"], result.ImportEvents.Select(e => e.ExternalId));
         Assert.Equal([new IntegrationCheckpoint(OpenFinanceIntegrationPlugin.CheckpointResource, "2026-09-10")], result.Checkpoints);
         var diagnostics = JsonNode.Parse(result.ProviderDiagnosticsJson!)!;
         Assert.Equal(1, diagnostics["pendingSkipped"]!.GetValue<int>());
-        Assert.True(diagnostics["accounts"]![0]!["balanceMatchesNet"]!.GetValue<bool>());
+        Assert.Equal("2026-09-02", diagnostics["sentFrom"]!.GetValue<string>());
+        var account = diagnostics["accounts"]![0]!;
+        Assert.Equal("br:077:0001:123456789", account["externalAccountId"]!.GetValue<string>());
+        Assert.Equal(3, account["lines"]!.GetValue<int>());
+        Assert.Equal(1, account["sent"]!.GetValue<int>());
+        Assert.Equal(3m, account["balance"]!.GetValue<decimal>());
+        Assert.Equal("2026-09-10T15:00:05+00:00", account["balanceAtUtc"]!.GetValue<string>());
+        Assert.Null(account["balanceMatchesNet"]);
+    }
+
+    [Fact]
+    public async Task A_full_history_request_reads_everything_and_card_balances_are_not_reported()
+    {
+        var source = new FakeSource("A", Card with { Balance = 89.9m }, [Line("p-1", OpenFinanceDirection.Debit, 89.9m, type: "CARD")]);
+
+        var result = await new TestPlugin(source).SyncAsync(new IntegrationSyncRequest(42, "Any", null, null), TestContext.Current.CancellationToken);
+
+        Assert.True(source.WasRead);
+        Assert.Null(source.ReadFrom);
+        var diagnostics = JsonNode.Parse(result.ProviderDiagnosticsJson!)!;
+        Assert.Null(diagnostics["sentFrom"]);
+        Assert.Null(diagnostics["accounts"]![0]!["balance"]);
+    }
+
+    [Fact]
+    public async Task The_checkpoint_never_moves_back_when_a_window_reads_older_lines_only()
+    {
+        var source = new FakeSource("A", Checking, [Line("a-1", OpenFinanceDirection.Credit, 1m)]);
+        var request = new IntegrationSyncRequest(42, "Any", Noon, Noon,
+            PreviousCheckpoints: [new IntegrationCheckpoint(OpenFinanceIntegrationPlugin.CheckpointResource, "2026-09-12")]);
+
+        var result = await new TestPlugin(source).SyncAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal([new IntegrationCheckpoint(OpenFinanceIntegrationPlugin.CheckpointResource, "2026-09-12")], result.Checkpoints);
     }
 
     [Fact]
@@ -221,9 +257,17 @@ public sealed class OpenFinanceMappingTests
         public Task<OpenFinanceConnectionCheck> CheckConnectionAsync(IntegrationSyncRequest request, CancellationToken cancellationToken) =>
             Failure is null ? Task.FromResult(new OpenFinanceConnectionCheck("connected", Noon.AddYears(1))) : Task.FromException<OpenFinanceConnectionCheck>(Failure);
 
-        public Task<OpenFinanceSnapshot> ReadAsync(IntegrationSyncRequest request, CancellationToken cancellationToken) =>
-            Failure is null
+        public bool WasRead { get; private set; }
+
+        public DateOnly? ReadFrom { get; private set; }
+
+        public Task<OpenFinanceSnapshot> ReadAsync(IntegrationSyncRequest request, DateOnly? readFrom, CancellationToken cancellationToken)
+        {
+            WasRead = true;
+            ReadFrom = readFrom;
+            return Failure is null
                 ? Task.FromResult(new OpenFinanceSnapshot([new OpenFinanceAccountTransactions(account, lines)], Noon.AddYears(1)))
                 : Task.FromException<OpenFinanceSnapshot>(Failure);
+        }
     }
 }

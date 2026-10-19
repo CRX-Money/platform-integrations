@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -56,6 +57,9 @@ internal sealed class PluggyApiKeyCache(TimeProvider timeProvider)
     public void Invalidate(PluggyCredentials credentials) => _keys.TryRemove(credentials.CacheKey, out _);
 }
 
+/// <summary>The lines of one account and the number of pages they took.</summary>
+internal sealed record PluggyTransactionsRead(IReadOnlyList<JsonElement> Lines, int Pages);
+
 /// <summary>Typed client for the Pluggy API. Failures become <see cref="OpenFinanceSourceException"/> with safe messages.</summary>
 internal sealed class PluggyApiClient(HttpClient httpClient, PluggyApiKeyCache apiKeys)
 {
@@ -71,43 +75,72 @@ internal sealed class PluggyApiClient(HttpClient httpClient, PluggyApiKeyCache a
     }
 
     /// <summary>
-    /// Walks <c>GET /v2/transactions</c> by cursor. The endpoint takes no date filter, so this is every line
-    /// Pluggy holds; stopping early would need Pluggy's page order to be documented as date-descending.
+    /// Walks <c>GET /v2/transactions</c> page by page (500 lines, Pluggy's default). <paramref name="dateFrom"/>
+    /// is Pluggy's <c>dateFrom</c> filter (<c>date &gt;= dateFrom</c>, <c>yyyy-mm-dd</c>); without it, every
+    /// line Pluggy holds. Pages are chained by the <c>after</c> cursor of each response's <c>next</c>.
     /// </summary>
-    public async Task<IReadOnlyList<JsonElement>> GetAllTransactionsAsync(PluggyCredentials credentials, string accountId, CancellationToken cancellationToken)
+    public async Task<PluggyTransactionsRead> GetTransactionsAsync(PluggyCredentials credentials, string accountId, DateOnly? dateFrom, CancellationToken cancellationToken)
     {
         var lines = new List<JsonElement>();
         var seenCursors = new HashSet<string>(StringComparer.Ordinal);
-        var path = $"v2/transactions?accountId={Uri.EscapeDataString(accountId)}";
-        for (var pages = 0; ; pages++)
+        string? after = null;
+        for (var pages = 1; ; pages++)
         {
-            if (pages == MaxPages)
+            if (pages > MaxPages)
                 throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy returned more than {MaxPages} transaction pages for one account.");
 
+            var path = TransactionsPath(accountId, dateFrom, after);
             var page = await GetAsync(credentials, path, PluggyJsonContext.Default.PluggyTransactionsPage, "transactions", cancellationToken).ConfigureAwait(false);
             foreach (var line in page.Results ?? [])
                 lines.Add(line.Clone());
 
             if (string.IsNullOrWhiteSpace(page.Next))
-                return lines;
-            if (!seenCursors.Add(page.Next))
-                throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, "Pluggy returned the same transactions cursor twice.");
+                return new PluggyTransactionsRead(lines, pages);
 
-            path = NextPath(accountId, page.Next);
+            after = AfterCursor(page.Next);
+            if (!seenCursors.Add(after))
+                throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, "Pluggy returned the same transactions cursor twice.");
         }
     }
 
     /// <summary>
-    /// <c>next</c> is a cursor token; tolerate a full or relative URL as well, keeping only path and query
-    /// so a response can never redirect the API key to another host.
+    /// The query of one page. Every page repeats the account and the window, so the filter holds whether or
+    /// not Pluggy's cursor carries it.
     /// </summary>
-    internal static string NextPath(string accountId, string next)
+    internal static string TransactionsPath(string accountId, DateOnly? dateFrom, string? after)
     {
-        if (Uri.TryCreate(next, UriKind.Absolute, out var absolute) && absolute.Scheme is "https" or "http")
-            return absolute.PathAndQuery.TrimStart('/');
-        if (next.StartsWith('/'))
-            return next.TrimStart('/');
-        return $"v2/transactions?accountId={Uri.EscapeDataString(accountId)}&cursor={Uri.EscapeDataString(next)}";
+        var path = new StringBuilder("v2/transactions?accountId=").Append(Uri.EscapeDataString(accountId));
+        if (dateFrom is { } from)
+            path.Append("&dateFrom=").Append(from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        if (after is not null)
+            path.Append("&after=").Append(Uri.EscapeDataString(after));
+        return path.ToString();
+    }
+
+    /// <summary>
+    /// The <c>after</c> cursor of a <c>next</c> value. Pluggy documents <c>next</c> as a ready query string
+    /// (<c>?accountId=…&amp;after=…</c>); a full URL or a bare cursor is tolerated too. Only the cursor is kept,
+    /// so a response can never send the API key to another host or change the account or window.
+    /// </summary>
+    internal static string AfterCursor(string next)
+    {
+        var value = next.Trim();
+        string query;
+        if (Uri.TryCreate(value, UriKind.Absolute, out var absolute) && absolute.Scheme is "https" or "http")
+            query = absolute.Query;
+        else if (value.IndexOf('?', StringComparison.Ordinal) is var mark and >= 0)
+            query = value[mark..];
+        else
+            return value;
+
+        foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            // UnescapeDataString, not form decoding: a '+' in a base64 cursor stays a '+'.
+            if (pair.StartsWith("after=", StringComparison.Ordinal) && Uri.UnescapeDataString(pair["after=".Length..]) is { Length: > 0 } cursor)
+                return cursor;
+        }
+
+        throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, "Pluggy returned a next page without an 'after' cursor.");
     }
 
     private async Task<T> GetAsync<T>(PluggyCredentials credentials, string path, JsonTypeInfo<T> typeInfo, string what, CancellationToken cancellationToken)

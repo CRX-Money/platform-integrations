@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text.Json.Nodes;
 using CrxMoney.Integrations.Abstractions.Plugins;
@@ -31,7 +32,7 @@ public sealed class PluggyIntegrationPluginTests
     }
 
     [Fact]
-    public async Task Sync_reads_both_accounts_through_every_cursor_page()
+    public async Task A_full_history_sync_reads_every_line_without_a_window()
     {
         var server = FakePluggyServer.WithFixtures();
         using var host = new PluggyTestHost(server);
@@ -42,18 +43,140 @@ public sealed class PluggyIntegrationPluginTests
         Assert.Equal(9, result.ImportEvents.Count(e => e.ExternalAccountId == BankAccountKey));
         Assert.Equal(2, result.ImportEvents.Count(e => e.ExternalAccountId == CardAccountKey));
         Assert.Equal(result.ImportEvents.Count, result.ImportEvents.Select(e => e.IdempotencyKey).Distinct().Count());
-        Assert.Equal([null, "synthetic-cursor-0001"], server.RequestsTo("/v2/transactions")
-            .Where(r => r.Query("accountId") == FakePluggyServer.BankAccountId).Select(r => r.Query("cursor")));
+        Assert.All(server.RequestsTo("/v2/transactions"), r => Assert.Equal(["accountId"], r.QueryNames()));
+        Assert.Single(server.TransactionRequests(FakePluggyServer.BankAccountId));
+        Assert.Single(server.TransactionRequests(FakePluggyServer.CardAccountId));
         Assert.Single(server.RequestsTo("/auth"));
         Assert.All(server.Requests.Where(r => r.Path != "/auth"), r => Assert.Equal("synthetic-api-key-0", r.Headers["X-API-KEY"]));
         Assert.Equal([new IntegrationCheckpoint("transactions", "2026-10-10")], result.Checkpoints);
 
         var diagnostics = JsonNode.Parse(result.ProviderDiagnosticsJson!)!;
         Assert.Equal(1, diagnostics["pendingSkipped"]!.GetValue<int>());
-        Assert.True(diagnostics["accounts"]![0]!["balanceMatchesNet"]!.GetValue<bool>());
+        Assert.Null(diagnostics["sentFrom"]);
         Assert.Equal("UPDATED", diagnostics["sourceDiagnostics"]!["itemStatus"]!.GetValue<string>());
+        Assert.Equal(2, diagnostics["sourceDiagnostics"]!["transactionPages"]!.GetValue<int>());
+        Assert.Null(diagnostics["sourceDiagnostics"]!["transactionsDateFrom"]);
         Assert.NotNull(diagnostics["credentialExpiresAtUtc"]);
     }
+
+    [Fact]
+    public async Task The_provider_summary_reports_the_deposit_balance_and_its_date_per_account()
+    {
+        using var host = new PluggyTestHost(FakePluggyServer.WithFixtures());
+
+        var result = await host.Plugin.SyncAsync(PluggyTestHost.Request(windowStart: new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.Zero)), Ct);
+
+        var accounts = JsonNode.Parse(result.ProviderDiagnosticsJson!)!["accounts"]!.AsArray();
+        var bank = accounts.Single(a => a!["kind"]!.GetValue<string>() == "deposit")!;
+        Assert.Equal(BankAccountKey, bank["externalAccountId"]!.GetValue<string>());
+        Assert.Equal(639.36m, bank["balance"]!.GetValue<decimal>());
+        // The balance is as of Pluggy's last refresh of the item (item.json lastUpdatedAt).
+        Assert.Equal("2026-10-13T09:00:00+00:00", bank["balanceAtUtc"]!.GetValue<string>());
+        Assert.Equal(1, bank["lines"]!.GetValue<int>());
+        Assert.Null(bank["balanceMatchesNet"]);
+
+        var card = accounts.Single(a => a!["kind"]!.GetValue<string>() == "creditCard")!;
+        Assert.Equal(CardAccountKey, card["externalAccountId"]!.GetValue<string>());
+        Assert.Null(card["balance"]);
+        Assert.Null(card["balanceAtUtc"]);
+        Assert.Equal(
+            ["kind", "externalAccountId", "lines", "posted", "sent", "balance", "balanceAtUtc"],
+            bank.AsObject().Select(p => p.Key));
+    }
+
+    [Fact]
+    public async Task Pages_are_chained_by_the_after_cursor_and_keep_the_window()
+    {
+        var server = FakePluggyServer.WithFixtures();
+        server.TransactionPageSize = 2;
+        using var host = new PluggyTestHost(server);
+
+        // Window start 27 Sep → sent from 20 Sep → requested from 19 Sep: bank lines c05..c09, three pages.
+        var result = await host.Plugin.SyncAsync(PluggyTestHost.Request(windowStart: new DateTimeOffset(2026, 9, 27, 12, 0, 0, TimeSpan.Zero)), Ct);
+
+        Assert.Equal(IntegrationSyncStatus.Succeeded, result.Status);
+        var bankPages = server.TransactionRequests(FakePluggyServer.BankAccountId);
+        Assert.Equal(3, bankPages.Count);
+        Assert.Null(bankPages[0].Query("after"));
+        Assert.Equal(["+++/AA==", "+++/AQ=="], bankPages.Skip(1).Select(r => r.Query("after")));
+        Assert.All(server.RequestsTo("/v2/transactions"), r =>
+        {
+            Assert.Equal("api.pluggy.ai", r.Uri.Host);
+            Assert.Equal("2026-09-19", r.Query("dateFrom"));
+            Assert.Null(r.Query("createdAtFrom"));
+            Assert.Null(r.Query("dateTo"));
+        });
+        Assert.Equal(
+            ["00000000-0000-4000-8000-000000000c05", "00000000-0000-4000-8000-000000000c06", "00000000-0000-4000-8000-000000000c07",
+             "00000000-0000-4000-8000-000000000c08", "00000000-0000-4000-8000-000000000c09", "00000000-0000-4000-8000-000000000d02"],
+            result.ImportEvents.Select(e => e.ExternalId).Order());
+        var diagnostics = JsonNode.Parse(result.ProviderDiagnosticsJson!)!;
+        Assert.Equal(4, diagnostics["sourceDiagnostics"]!["transactionPages"]!.GetValue<int>()); // 3 bank + 1 card (d02, d03)
+        Assert.Equal("2026-09-19", diagnostics["sourceDiagnostics"]!["transactionsDateFrom"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task A_full_history_read_over_many_pages_matches_a_single_page_read()
+    {
+        var paged = FakePluggyServer.WithFixtures();
+        paged.TransactionPageSize = 2;
+        using var pagedHost = new PluggyTestHost(paged);
+        using var singleHost = new PluggyTestHost(FakePluggyServer.WithFixtures());
+
+        var many = await pagedHost.Plugin.SyncAsync(PluggyTestHost.Request(), Ct);
+        var one = await singleHost.Plugin.SyncAsync(PluggyTestHost.Request(), Ct);
+
+        Assert.Equal(5, paged.TransactionRequests(FakePluggyServer.BankAccountId).Count);
+        Assert.Equal(one.ImportEvents.Select(e => (e.ExternalId, e.IdempotencyKey)).Order(), many.ImportEvents.Select(e => (e.ExternalId, e.IdempotencyKey)).Order());
+    }
+
+    /// <summary>
+    /// The guarantee behind windowed reads: whatever the window, the lines sent and their keys are exactly those a
+    /// full read would send from the same date, including the two identical lines of 25 Sep told apart by ordinal.
+    /// </summary>
+    [Theory]
+    [InlineData("2026-09-02T12:00:00Z", "2026-08-25")]
+    [InlineData("2026-09-12T04:00:00Z", "2026-09-04")]
+    [InlineData("2026-09-13T02:00:00Z", "2026-09-04")] // 23:00 on 12 Sep in Brazil
+    [InlineData("2026-10-02T12:00:00Z", "2026-09-24")]
+    [InlineData("2026-10-03T02:59:59Z", "2026-09-24")]
+    [InlineData("2026-10-20T12:00:00Z", "2026-10-12")]
+    public async Task A_windowed_sync_sends_what_a_full_read_sends_from_the_same_date_with_the_same_keys(string windowStart, string expectedDateFrom)
+    {
+        var start = DateTimeOffset.Parse(windowStart, CultureInfo.InvariantCulture);
+        var sendFrom = BrazilDate(start).AddDays(-OpenFinanceIntegrationPlugin.OverlapDays);
+        var server = FakePluggyServer.WithFixtures();
+        using var windowedHost = new PluggyTestHost(server);
+        using var fullHost = new PluggyTestHost(FakePluggyServer.WithFixtures());
+
+        var windowed = await windowedHost.Plugin.SyncAsync(PluggyTestHost.Request(windowStart: start), Ct);
+        var full = await fullHost.Plugin.SyncAsync(PluggyTestHost.Request(), Ct);
+
+        Assert.All(server.RequestsTo("/v2/transactions"), r => Assert.Equal(expectedDateFrom, r.Query("dateFrom")));
+        var expected = full.ImportEvents
+            .Where(e => BrazilDate(e.OccurredAtUtc) >= sendFrom)
+            .Select(e => (e.ExternalId, e.IdempotencyKey))
+            .Order();
+        Assert.Equal(expected, windowed.ImportEvents.Select(e => (e.ExternalId, e.IdempotencyKey)).Order());
+    }
+
+    [Fact]
+    public async Task A_window_with_no_new_lines_keeps_the_previous_checkpoint()
+    {
+        using var host = new PluggyTestHost(FakePluggyServer.WithFixtures());
+        var request = PluggyTestHost.Request(windowStart: new DateTimeOffset(2026, 12, 1, 12, 0, 0, TimeSpan.Zero)) with
+        {
+            PreviousCheckpoints = [new IntegrationCheckpoint("transactions", "2026-10-10")],
+        };
+
+        var result = await host.Plugin.SyncAsync(request, Ct);
+
+        Assert.Equal(IntegrationSyncStatus.Succeeded, result.Status);
+        Assert.Empty(result.ImportEvents);
+        Assert.Equal([new IntegrationCheckpoint("transactions", "2026-10-10")], result.Checkpoints);
+    }
+
+    private static DateOnly BrazilDate(DateTimeOffset instant) => DateOnly.FromDateTime(instant.ToOffset(TimeSpan.FromHours(-3)).DateTime);
 
     [Fact]
     public async Task Checking_lines_map_with_counterparty_tax_ids_and_sweep_hints()
@@ -120,13 +243,25 @@ public sealed class PluggyIntegrationPluginTests
     }
 
     [Fact]
-    public async Task Incremental_syncs_send_only_recent_lines()
+    public async Task Incremental_syncs_read_and_send_only_the_window()
     {
-        using var host = new PluggyTestHost(FakePluggyServer.WithFixtures());
+        var server = FakePluggyServer.WithFixtures();
+        using var host = new PluggyTestHost(server);
 
+        // Window start 12 Oct → sent from 5 Oct (seven days of overlap) → requested from 4 Oct (one day of margin).
         var result = await host.Plugin.SyncAsync(PluggyTestHost.Request(windowStart: new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.Zero)), Ct);
 
         Assert.Equal(["00000000-0000-4000-8000-000000000c09", "00000000-0000-4000-8000-000000000d02"], result.ImportEvents.Select(e => e.ExternalId).Order());
+        Assert.Equal(2, server.RequestsTo("/v2/transactions").Count);
+        Assert.All(server.RequestsTo("/v2/transactions"), r =>
+        {
+            Assert.Equal(["accountId", "dateFrom"], r.QueryNames());
+            Assert.Equal("2026-10-04", r.Query("dateFrom"));
+        });
+        var diagnostics = JsonNode.Parse(result.ProviderDiagnosticsJson!)!;
+        Assert.Equal("2026-10-05", diagnostics["sentFrom"]!.GetValue<string>());
+        Assert.Equal([1, 2], diagnostics["accounts"]!.AsArray().Select(a => a!["lines"]!.GetValue<int>()));
+        Assert.Equal([new IntegrationCheckpoint("transactions", "2026-10-10")], result.Checkpoints);
     }
 
     [Fact]
@@ -258,12 +393,44 @@ public sealed class PluggyIntegrationPluginTests
     }
 
     [Theory]
-    [InlineData("abc123", "v2/transactions?accountId=acc-1&cursor=abc123")]
-    [InlineData("a+b/c=", "v2/transactions?accountId=acc-1&cursor=a%2Bb%2Fc%3D")]
-    [InlineData("https://evil.example/v2/transactions?accountId=acc-1&cursor=x", "v2/transactions?accountId=acc-1&cursor=x")]
-    [InlineData("/v2/transactions?accountId=acc-1&cursor=y", "v2/transactions?accountId=acc-1&cursor=y")]
-    public void Next_cursor_stays_on_the_pluggy_host(string next, string expected)
+    [InlineData("?accountId=acc-1&after=abc123", "abc123")]
+    [InlineData("?accountId=acc-1&after=a%2Bb%2Fc%3D", "a+b/c=")]
+    [InlineData("?after=a+b/c=&accountId=acc-1", "a+b/c=")]
+    [InlineData("https://evil.example/v2/transactions?accountId=other&after=x", "x")]
+    [InlineData("/v2/transactions?accountId=acc-1&after=y", "y")]
+    [InlineData("bare+cursor/=", "bare+cursor/=")]
+    public void Only_the_after_cursor_of_next_is_followed(string next, string expected)
     {
-        Assert.Equal(expected, PluggyApiClient.NextPath("acc-1", next));
+        Assert.Equal(expected, PluggyApiClient.AfterCursor(next));
+    }
+
+    [Fact]
+    public void A_next_page_without_a_cursor_is_an_upstream_failure()
+    {
+        var failure = Assert.Throws<OpenFinanceSourceException>(() => PluggyApiClient.AfterCursor("?accountId=acc-1"));
+        Assert.Equal(IntegrationErrorKind.Upstream, failure.Kind);
+    }
+
+    [Theory]
+    [InlineData(null, null, "v2/transactions?accountId=acc-1")]
+    [InlineData("2026-10-04", null, "v2/transactions?accountId=acc-1&dateFrom=2026-10-04")]
+    [InlineData("2026-10-04", "a+b/c=", "v2/transactions?accountId=acc-1&dateFrom=2026-10-04&after=a%2Bb%2Fc%3D")]
+    public void Every_page_names_the_account_and_the_window(string? dateFrom, string? after, string expected)
+    {
+        DateOnly? from = dateFrom is null ? null : DateOnly.ParseExact(dateFrom, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        Assert.Equal(expected, PluggyApiClient.TransactionsPath("acc-1", from, after));
+    }
+
+    [Fact]
+    public async Task A_repeated_cursor_fails_instead_of_looping()
+    {
+        var server = FakePluggyServer.WithFixtures().On("/v2/transactions", (_, _) =>
+            FakePluggyServer.Json("""{"results":[],"next":"?accountId=x&after=same"}"""));
+        using var host = new PluggyTestHost(server);
+
+        var result = await host.Plugin.SyncAsync(PluggyTestHost.Request(), Ct);
+
+        Assert.Equal(IntegrationErrorKind.Upstream, result.ErrorKind);
+        Assert.Equal(2, server.RequestsTo("/v2/transactions").Count);
     }
 }
