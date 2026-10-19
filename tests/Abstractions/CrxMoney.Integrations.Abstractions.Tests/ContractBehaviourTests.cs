@@ -97,6 +97,43 @@ public sealed class ContractBehaviourTests
         Assert.Equal(
             [0, 1],
             Enum.GetValues<Models.TransferKind>().Select(value => (int)value));
+        Assert.Equal(
+            [0, 1, 2, 3],
+            Enum.GetValues<IntegrationCredentialSlot>().Select(value => (int)value));
+    }
+
+    [Fact]
+    public void Connection_test_results_default_to_no_error_and_no_operators()
+    {
+        var success = IntegrationConnectionTestResult.Success("works");
+        var failure = IntegrationConnectionTestResult.Failure(IntegrationErrorKind.Authentication, "rejected");
+
+        Assert.True(success.Succeeded);
+        Assert.Equal(IntegrationErrorKind.None, success.ErrorKind);
+        Assert.Empty(success.AccountOperators);
+        Assert.Null(success.CredentialExpiresAtUtc);
+        Assert.Null(success.IsSandbox);
+        Assert.False(failure.Succeeded);
+        Assert.Equal(IntegrationErrorKind.Authentication, failure.ErrorKind);
+        Assert.Equal("rejected", failure.Summary);
+    }
+
+    [Fact]
+    public void A_sync_request_names_no_adapter_unless_the_host_sets_one()
+    {
+        var request = new IntegrationSyncRequest(1, "provider", null, null);
+
+        Assert.Null(request.AdapterId);
+        Assert.Equal("adapter", (request with { AdapterId = "adapter" }).AdapterId);
+    }
+
+    [Fact]
+    public void The_connection_settings_contract_is_optional()
+    {
+        IIntegrationPlugin plugin = new MinimalPlugin();
+
+        Assert.False(plugin is IIntegrationConnectionSettingsProvider);
+        Assert.False(plugin is IIntegrationConnectionTester);
     }
 
     private sealed class MinimalPlugin : IIntegrationPlugin

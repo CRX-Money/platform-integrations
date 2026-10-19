@@ -23,6 +23,24 @@ public sealed partial record BrazilianBankAccount(string Compe, string Branch, s
     public static string CardExternalAccountId(string compe, string last4) => $"br:{NormalizeCompe(compe)}:card:{last4}";
 
     /// <summary>
+    /// The external account id of an investment position held at <paramref name="compe"/>:
+    /// <c>br:{compe}:inv:{basis}:{key}</c>. The basis says what the key is (<c>number</c>, <c>isin</c>, <c>code</c>,
+    /// or a source name when only the aggregator's id is available); the key keeps letters and digits only, upper-cased.
+    /// </summary>
+    /// <exception cref="FormatException">The basis or the key has no letters or digits.</exception>
+    public static string InvestmentExternalAccountId(string compe, string basis, string key)
+    {
+        var normalizedBasis = Alphanumeric(basis).ToLowerInvariant();
+        var normalizedKey = Alphanumeric(key);
+        if (normalizedBasis.Length == 0 || normalizedKey.Length == 0)
+            throw new FormatException("An investment id needs a basis and a key with letters or digits.");
+        return $"br:{NormalizeCompe(compe)}:inv:{normalizedBasis}:{normalizedKey}";
+    }
+
+    private static string Alphanumeric(string? value) =>
+        new((value ?? string.Empty).Where(char.IsAsciiLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+
+    /// <summary>
     /// Builds the identity from its parts, normalising punctuation: the COMPE code is padded to three
     /// digits, the branch loses a check digit after a dash (<c>1234-5</c> becomes <c>1234</c>, as most
     /// sources omit it), and the account number keeps its check digit but loses dashes, dots and leading zeros.

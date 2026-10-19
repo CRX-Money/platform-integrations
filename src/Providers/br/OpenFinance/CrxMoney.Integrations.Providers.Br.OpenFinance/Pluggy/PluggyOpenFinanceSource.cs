@@ -1,0 +1,536 @@
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
+using CrxMoney.Integrations.Abstractions.Plugins;
+using CrxMoney.Integrations.Abstractions.Sync;
+using CrxMoney.Integrations.Countries.Br;
+using CrxMoney.Integrations.Providers.Br.OpenFinance;
+using CrxMoney.Integrations.Providers.Br.OpenFinance.Pluggy.Api;
+
+namespace CrxMoney.Integrations.Providers.Br.OpenFinance.Pluggy;
+
+/// <summary>
+/// Reads a Pluggy item and normalises it into the Open Finance model. Everything Pluggy-specific lives
+/// here: credentials (<c>ApiKey</c> = client id, <c>ApiSecret</c> = client secret, <c>Passphrase</c> = item id),
+/// item states, account identities, sign conventions and field names.
+/// </summary>
+internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider timeProvider) : IOpenFinanceSource
+{
+    public string SourceName => PluggyAdapter.Name;
+
+    public IntegrationConnectionAdapterSettings? GetConnectionSettings(string? culture) => PluggyConnectionSettings.Adapter(culture);
+
+    public async Task<OpenFinanceConnectionCheck> CheckConnectionAsync(IntegrationSyncRequest request, CancellationToken cancellationToken)
+    {
+        var (credentials, itemId) = ParseCredentials(request);
+        var item = await api.GetItemAsync(credentials, itemId, cancellationToken).ConfigureAwait(false);
+        EnsureUsable(item);
+
+        var institution = item.Connector?.Name?.Trim();
+        var summary = $"Pluggy item {item.Status}" + (string.IsNullOrEmpty(institution) ? string.Empty : $" via {institution}")
+            + (item.LastUpdatedAt is { } updated ? $", last refreshed {updated.ToUniversalTime():yyyy-MM-dd HH:mm} UTC" : string.Empty) + ".";
+        return new OpenFinanceConnectionCheck(summary, item.ConsentExpiresAt, ItemDiagnostics(item))
+        {
+            LastRefreshedAt = item.LastUpdatedAt,
+            IsSandbox = item.Connector?.IsSandbox,
+            AccountOperatorCompes = await AccountOperatorCompesAsync(credentials, itemId, cancellationToken).ConfigureAwait(false),
+        };
+    }
+
+    /// <summary>
+    /// The COMPE codes of the item's deposit accounts: the account operator. With Meu Pluggy the connector is
+    /// Meu Pluggy itself, never the bank, so the accounts are the only place the bank shows. Best effort: a test
+    /// whose item read worked does not fail because the accounts could not be listed.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> AccountOperatorCompesAsync(PluggyCredentials credentials, Guid itemId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var accounts = await api.GetAccountsAsync(credentials, itemId, cancellationToken).ConfigureAwait(false);
+            return accounts
+                .Select(a => BrazilianBankAccount.TryParseTransferNumber(a.BankData?.TransferNumber)?.Compe)
+                .OfType<string>()
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+        }
+        catch (OpenFinanceSourceException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Days requested before the plugin's read date. Pluggy filters <c>dateFrom</c> on its own <c>date</c> field,
+    /// which is a UTC instant (card lines: midnight in Brazil, 03:00Z), while the plugin works in Brazil's
+    /// calendar from <c>creditCardMetadata.transactionDateTime</c> when present. One day more covers both
+    /// readings; the plugin drops the extra lines.
+    /// </summary>
+    internal const int DateFromMarginDays = 1;
+
+    /// <remarks>
+    /// The window is <c>dateFrom</c>, by transaction date, not <c>createdAtFrom</c>, by when Pluggy stored the line:
+    /// a date window always holds every line of a booking date, so lines that are identical but for their ordinal
+    /// are numbered as in a full read and keep their keys. A <c>createdAtFrom</c> read can hold only the later of two
+    /// identical lines, which would then take the first one's key and be dropped by the host as a duplicate.
+    /// </remarks>
+    public async Task<OpenFinanceSnapshot> ReadAsync(IntegrationSyncRequest request, DateOnly? readFrom, CancellationToken cancellationToken)
+    {
+        var (credentials, itemId) = ParseCredentials(request);
+        var item = await api.GetItemAsync(credentials, itemId, cancellationToken).ConfigureAwait(false);
+        EnsureUsable(item);
+
+        var accounts = await api.GetAccountsAsync(credentials, itemId, cancellationToken).ConfigureAwait(false);
+        // Pluggy gives cards no issuer code; a card belongs to the bank of the item's deposit account.
+        var bankAccounts = accounts.Where(a => string.Equals(a.Type, "BANK", StringComparison.OrdinalIgnoreCase)).ToList();
+        var issuerCompe = bankAccounts
+            .Select(a => BrazilianBankAccount.TryParseTransferNumber(a.BankData?.TransferNumber)?.Compe)
+            .FirstOrDefault(c => c is not null);
+        // An item belongs to one holder; its bank account carries the holder's CPF/CNPJ.
+        var holder = bankAccounts.Select(a => BrazilianTaxId.TryParse(a.TaxNumber)).FirstOrDefault(t => t is not null);
+
+        DateOnly? dateFrom = readFrom?.AddDays(-DateFromMarginDays);
+        // A card's balance includes its pending purchases, which can be as old as the open bill: read them all.
+        DateOnly? cardDateFrom = dateFrom is { } windowFrom
+            ? Min(windowFrom, BrazilBankingCalendar.DateOf(timeProvider.GetUtcNow()).AddDays(-CardPendingLookbackDays))
+            : null;
+        var result = new List<OpenFinanceAccountTransactions>();
+        var pages = 0;
+        foreach (var account in accounts)
+        {
+            var normalized = NormalizeAccount(account, issuerCompe);
+            // Balances are as of Pluggy's last refresh of the item from the bank.
+            var hasBalance = normalized.Balance is not null || normalized.Card is not null;
+            normalized = normalized with { HolderTaxId = holder, BalanceAt = hasBalance ? item.LastUpdatedAt : null };
+            var from = normalized.Kind == OpenFinanceAccountKind.CreditCard ? cardDateFrom : dateFrom;
+            var read = await api.GetTransactionsAsync(credentials, account.Id!, from, cancellationToken).ConfigureAwait(false);
+            pages += read.Pages;
+            result.Add(new OpenFinanceAccountTransactions(normalized, read.Lines.Select(l => NormalizeTransaction(normalized, l)).ToList()));
+        }
+
+        var investments = await ReadInvestmentsAsync(credentials, itemId, item, issuerCompe, cancellationToken).ConfigureAwait(false);
+
+        return new OpenFinanceSnapshot(result, item.ConsentExpiresAt, ItemDiagnostics(item, writer =>
+        {
+            if (dateFrom is { } windowFrom)
+                writer.WriteString("transactionsDateFrom", windowFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            if (cardDateFrom is { } cardFrom && result.Any(a => a.Account.Kind == OpenFinanceAccountKind.CreditCard))
+                writer.WriteString("cardTransactionsDateFrom", cardFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            writer.WriteNumber("transactionPages", pages);
+            investments.WriteDiagnostics(writer);
+        }))
+        {
+            Investments = investments.Positions,
+        };
+    }
+
+    /// <summary>
+    /// Days of card lines read before today on a windowed sync, so every pending purchase of the open bill is seen.
+    /// Pluggy marks a card purchase pending until a bill closes on it; two cycles leave room for a late closing.
+    /// </summary>
+    internal const int CardPendingLookbackDays = 62;
+
+    /// <summary>The identity basis of a position known only by Pluggy's id.</summary>
+    internal const string SourceIdBasis = "pluggy";
+
+    private static DateOnly Min(DateOnly a, DateOnly b) => a < b ? a : b;
+
+    /// <summary>The positions of the item and what reading them took, for the diagnostics.</summary>
+    private sealed record InvestmentsRead(IReadOnlyList<OpenFinanceInvestmentMovements> Positions, string? SkippedReason, int Pages, int MovementPages, int MovementsSkipped)
+    {
+        public void WriteDiagnostics(Utf8JsonWriter writer)
+        {
+            writer.WriteNumber("investments", Positions.Count);
+            if (SkippedReason is not null)
+                writer.WriteString("investmentsSkipped", SkippedReason);
+            writer.WriteNumber("investmentPages", Pages);
+            writer.WriteNumber("investmentTransactionPages", MovementPages);
+            writer.WriteNumber("investmentMovementsSkipped", MovementsSkipped);
+            // Flat like the other facts: "number:2,pluggy:1".
+            writer.WriteString("investmentIdBases", string.Join(',', Positions
+                .GroupBy(p => p.Investment.IdentityBasis)
+                .OrderBy(g => g.Key, StringComparer.Ordinal)
+                .Select(g => $"{g.Key}:{g.Count()}")));
+        }
+    }
+
+    /// <summary>
+    /// Reads <c>/investments</c> and each position's <c>/investments/{id}/transactions</c> when the item has the
+    /// INVESTMENTS (and INVESTMENTS_TRANSACTIONS) products. A position is held at the item's bank, so its id needs that
+    /// bank's COMPE; without a deposit account in the item, positions are skipped and the diagnostics say why.
+    /// </summary>
+    private async Task<InvestmentsRead> ReadInvestmentsAsync(PluggyCredentials credentials, Guid itemId, PluggyItem item, string? compe, CancellationToken cancellationToken)
+    {
+        var products = item.Products ?? [];
+        bool Has(string product) => products.Contains(product, StringComparer.OrdinalIgnoreCase);
+        if (!Has("INVESTMENTS"))
+            return new InvestmentsRead([], "not an item product", 0, 0, 0);
+        if (compe is null)
+            return new InvestmentsRead([], "no deposit account to identify the institution", 0, 0, 0);
+
+        PluggyNumberedRead listing;
+        try
+        {
+            listing = await api.GetInvestmentsAsync(credentials, itemId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OpenFinanceSourceException ex) when (ex.Kind == IntegrationErrorKind.Permission)
+        {
+            return new InvestmentsRead([], "not allowed for this application", 0, 0, 0);
+        }
+
+        var positions = listing.Results.Select(r => (Raw: r, Wire: Deserialize(r, PluggyJsonContext.Default.PluggyInvestment, "investment"))).ToList();
+        var identities = InvestmentIdentities(positions.Select(p => p.Wire).ToList(), compe);
+        var readMovements = Has("INVESTMENTS_TRANSACTIONS");
+        var result = new List<OpenFinanceInvestmentMovements>();
+        int movementPages = 0, skipped = 0;
+        foreach (var (raw, wire) in positions)
+        {
+            var investment = NormalizeInvestment(wire, raw, compe, identities[wire.Id!.Trim()]);
+            var movements = new List<OpenFinanceInvestmentMovement>();
+            if (readMovements)
+            {
+                var read = await api.GetInvestmentTransactionsAsync(credentials, investment.SourceInvestmentId, cancellationToken).ConfigureAwait(false);
+                movementPages += read.Pages;
+                foreach (var line in read.Results)
+                {
+                    if (NormalizeInvestmentMovement(line) is { } movement)
+                        movements.Add(movement);
+                    else
+                        skipped++;
+                }
+            }
+
+            result.Add(new OpenFinanceInvestmentMovements(investment, movements));
+        }
+
+        return new InvestmentsRead(result, readMovements ? null : "movements: not an item product", listing.Pages, movementPages, skipped);
+    }
+
+    /// <summary>
+    /// The identity of each position, best first: the institution's reference for the holder's position
+    /// (<c>number</c>), the <c>isin</c>, the <c>code</c> of a fund, ETF or stock (its CNPJ or ticker), and only then
+    /// Pluggy's own id. Positions that would share an identity fall back to Pluggy's id.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, (string Basis, string Key)> InvestmentIdentities(IReadOnlyList<PluggyInvestment> investments, string compe)
+    {
+        static bool Usable(string? value) => value is not null && value.Any(char.IsAsciiLetterOrDigit);
+
+        var chosen = new Dictionary<string, (string Basis, string Key)>(StringComparer.Ordinal);
+        foreach (var investment in investments)
+        {
+            var id = investment.Id?.Trim();
+            if (string.IsNullOrEmpty(id))
+                throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, "Pluggy returned an investment without an id.");
+            if (chosen.ContainsKey(id))
+                throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, "Pluggy returned the same investment twice.");
+
+            var type = investment.Type?.Trim().ToUpperInvariant();
+            chosen[id] = Usable(investment.Number) ? ("number", investment.Number!)
+                : investment.Isin?.Trim() is { Length: 12 } isin && Usable(isin) ? ("isin", isin)
+                : type is "MUTUAL_FUND" or "ETF" or "EQUITY" && Usable(investment.Code) ? ("code", investment.Code!)
+                : (SourceIdBasis, id);
+        }
+
+        var collisions = chosen
+            .GroupBy(c => BrazilianBankAccount.InvestmentExternalAccountId(compe, c.Value.Basis, c.Value.Key), StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .SelectMany(g => g.Select(c => c.Key))
+            .ToList();
+        foreach (var id in collisions)
+            chosen[id] = (SourceIdBasis, id);
+        return chosen;
+    }
+
+    internal static OpenFinanceInvestment NormalizeInvestment(PluggyInvestment investment, JsonElement raw, string compe, (string Basis, string Key) identity)
+    {
+        var id = investment.Id!.Trim();
+        var balance = investment.Balance
+            ?? throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy investment {id} has no balance.");
+        var date = investment.Date
+            ?? throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy investment {id} has no balance date.");
+        var currency = string.IsNullOrWhiteSpace(investment.CurrencyCode) ? "BRL" : investment.CurrencyCode.Trim().ToUpperInvariant();
+        return new OpenFinanceInvestment(
+            id,
+            compe,
+            identity.Basis,
+            identity.Key,
+            FirstNonEmpty(investment.Type)?.ToUpperInvariant() ?? "OTHER",
+            FirstNonEmpty(investment.Subtype)?.ToUpperInvariant(),
+            FirstNonEmpty(investment.Name) ?? "Investment",
+            currency,
+            balance,
+            date)
+        {
+            Issuer = FirstNonEmpty(investment.Issuer),
+            IssuerTaxId = BrazilianTaxId.TryParse(investment.IssuerCnpj),
+            Isin = FirstNonEmpty(investment.Isin),
+            Status = FirstNonEmpty(investment.Status)?.ToUpperInvariant(),
+            GrossAmount = investment.Amount,
+            AmountInvested = investment.AmountOriginal,
+            Profit = investment.AmountProfit,
+            IncomeTax = investment.Taxes,
+            FinancialTax = investment.Taxes2,
+            IssueDate = investment.IssueDate is { } issued ? BrazilBankingCalendar.DateOf(issued) : null,
+            DueDate = investment.DueDate is { } due ? BrazilBankingCalendar.DateOf(due) : null,
+            RateType = FirstNonEmpty(investment.RateType),
+            Rate = investment.Rate,
+            SourcePayload = raw,
+        };
+    }
+
+    /// <summary>
+    /// Normalises one investment transaction, or returns <c>null</c> for one that moves no known amount (a
+    /// <c>TRANSFER</c> without amount, which Pluggy allows, or a type it does not document).
+    /// </summary>
+    internal static OpenFinanceInvestmentMovement? NormalizeInvestmentMovement(JsonElement line)
+    {
+        var movement = Deserialize(line, PluggyJsonContext.Default.PluggyInvestmentTransaction, "investment transaction");
+        var id = movement.Id?.Trim();
+        if (string.IsNullOrEmpty(id))
+            throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, "Pluggy returned an investment transaction without an id.");
+        var time = movement.Date
+            ?? throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy investment transaction {id} has no date.");
+
+        var credit = string.Equals(movement.MovementType, "CREDIT", StringComparison.OrdinalIgnoreCase);
+        OpenFinanceInvestmentOperation? operation = movement.Type?.Trim().ToUpperInvariant() switch
+        {
+            "BUY" => OpenFinanceInvestmentOperation.Application,
+            "SELL" => OpenFinanceInvestmentOperation.Redemption,
+            "AMORTIZATION" => OpenFinanceInvestmentOperation.Amortization,
+            "INTEREST" => OpenFinanceInvestmentOperation.Income,
+            "TAX" => OpenFinanceInvestmentOperation.Tax,
+            "TRANSFER" => credit ? OpenFinanceInvestmentOperation.TransferIn : OpenFinanceInvestmentOperation.TransferOut,
+            _ => null,
+        };
+        if (operation is null || movement.Amount is not { } amount || amount == 0m)
+            return null;
+
+        var e = movement.Expenses;
+        static decimal Abs(decimal? value) => Math.Abs(value ?? 0m);
+        var expenses = e is null
+            ? OpenFinanceInvestmentExpenses.None
+            : new OpenFinanceInvestmentExpenses(
+                Abs(e.IncomeTax),
+                Abs(e.Iof),
+                Abs(e.ServiceTax) + Abs(e.BrokerageFee) + Abs(e.TradingAssetsNoticeFee) + Abs(e.MaintenanceFee) + Abs(e.SettlementFee)
+                    + Abs(e.ClearingFee) + Abs(e.StockExchangeFee) + Abs(e.CustodyFee) + Abs(e.OperatingFee) + Abs(e.Other));
+
+        return new OpenFinanceInvestmentMovement(id, time, operation.Value, Math.Abs(amount), expenses, FirstNonEmpty(movement.Description), line)
+        {
+            // Pluggy: movementType DEBIT (its default for INTEREST) is money leaving the position, i.e. income paid out.
+            PaidOut = operation == OpenFinanceInvestmentOperation.Income && !credit,
+            SettlementTime = movement.TradeDate,
+            ReportedNetAmount = movement.NetAmount,
+        };
+    }
+
+    private static T Deserialize<T>(JsonElement element, JsonTypeInfo<T> typeInfo, string what)
+        where T : class
+    {
+        try
+        {
+            return element.Deserialize(typeInfo)
+                ?? throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy returned an empty {what}.");
+        }
+        catch (JsonException ex)
+        {
+            throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy returned an {what} in an unexpected shape.", ex);
+        }
+    }
+
+    internal static (PluggyCredentials Credentials, Guid ItemId) ParseCredentials(IntegrationSyncRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.ApiKey) || string.IsNullOrWhiteSpace(request.ApiSecret))
+            throw new OpenFinanceSourceException(IntegrationErrorKind.Configuration, "The Pluggy client id and client secret are required.");
+        if (!Guid.TryParse(request.Passphrase?.Trim(), out var itemId))
+            throw new OpenFinanceSourceException(IntegrationErrorKind.Configuration, "The Pluggy item id is missing or is not a UUID.");
+        return (new PluggyCredentials(request.ApiKey.Trim(), request.ApiSecret.Trim()), itemId);
+    }
+
+    /// <summary>Fails fast on item states whose data cannot be trusted or read.</summary>
+    private void EnsureUsable(PluggyItem item)
+    {
+        if (item.ConsentExpiresAt is { } expiresAt && expiresAt <= timeProvider.GetUtcNow())
+        {
+            throw new OpenFinanceSourceException(IntegrationErrorKind.Authentication,
+                $"The Open Finance consent expired on {expiresAt:yyyy-MM-dd}. Reconnect the bank in Meu Pluggy to renew it.");
+        }
+
+        switch (item.Status?.ToUpperInvariant())
+        {
+            case "UPDATED":
+            case "UPDATING":
+                return;
+            case "LOGIN_ERROR":
+                throw new OpenFinanceSourceException(IntegrationErrorKind.Authentication,
+                    "Pluggy cannot log in to the bank for this item. Reconnect the bank to renew the consent.");
+            case "WAITING_USER_INPUT":
+            case "WAITING_USER_ACTION":
+                throw new OpenFinanceSourceException(IntegrationErrorKind.Configuration,
+                    "The Pluggy item is waiting for the account holder to complete the connection.");
+            case "OUTDATED":
+                throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream,
+                    $"Pluggy could not refresh this item{(item.LastUpdatedAt is { } at ? $" since {at:yyyy-MM-dd}" : string.Empty)}{(item.Error?.Code is { } code ? $" ({code})" : string.Empty)}; its data is stale.");
+            default:
+                throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"The Pluggy item is in an unexpected state '{item.Status}'.");
+        }
+    }
+
+    internal static OpenFinanceAccount NormalizeAccount(PluggyAccount account, string? issuerCompe)
+    {
+        if (string.IsNullOrWhiteSpace(account.Id))
+            throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, "Pluggy returned an account without an id.");
+
+        var currency = string.IsNullOrWhiteSpace(account.CurrencyCode) ? "BRL" : account.CurrencyCode.Trim().ToUpperInvariant();
+        switch (account.Type?.ToUpperInvariant())
+        {
+            case "BANK":
+                var bankAccount = BrazilianBankAccount.TryParseTransferNumber(account.BankData?.TransferNumber)
+                    ?? throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream,
+                        "Pluggy returned a bank account without its COMPE/branch/account identity (bankData.transferNumber).");
+                return new OpenFinanceAccount(account.Id, OpenFinanceAccountKind.Deposit, bankAccount, bankAccount.Compe, null, currency, account.Balance);
+            case "CREDIT":
+                var last4 = new string((account.Number ?? string.Empty).Where(char.IsAsciiDigit).ToArray());
+                if (last4.Length < 4 || issuerCompe is null)
+                {
+                    throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream,
+                        "Pluggy returned a card that cannot be identified (no last four digits, or no deposit account of the same bank in the item).");
+                }
+
+                // On Open Finance connectors Pluggy's card balance is the used limit: posted and pending purchases.
+                return new OpenFinanceAccount(account.Id, OpenFinanceAccountKind.CreditCard, null, issuerCompe, last4[^4..], currency, null)
+                {
+                    Card = account.Balance is { } owed
+                        ? new OpenFinanceCardBalance(
+                            owed,
+                            IncludesPending: true,
+                            account.CreditData?.CreditLimit,
+                            account.CreditData?.AvailableCreditLimit,
+                            account.CreditData?.MinimumPayment,
+                            DatePart(account.CreditData?.BalanceCloseDate),
+                            DatePart(account.CreditData?.BalanceDueDate))
+                        : null,
+                };
+            default:
+                throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy returned an account of unknown type '{account.Type}'.");
+        }
+    }
+
+    internal static OpenFinanceTransaction NormalizeTransaction(OpenFinanceAccount account, JsonElement line)
+    {
+        PluggyTransaction transaction;
+        try
+        {
+            transaction = line.Deserialize(PluggyJsonContext.Default.PluggyTransaction)
+                ?? throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, "Pluggy returned an empty transaction.");
+        }
+        catch (JsonException ex)
+        {
+            throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, "Pluggy returned a transaction in an unexpected shape.", ex);
+        }
+
+        var id = transaction.Id?.Trim();
+        if (string.IsNullOrEmpty(id))
+            throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, "Pluggy returned a transaction without an id.");
+
+        // Pluggy's sign depends on the product (card purchases are positive); the type is reliable.
+        var direction = transaction.Type?.ToUpperInvariant() switch
+        {
+            "CREDIT" => OpenFinanceDirection.Credit,
+            "DEBIT" => OpenFinanceDirection.Debit,
+            _ => throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy transaction {id} has type '{transaction.Type}', expected CREDIT or DEBIT."),
+        };
+        var amount = transaction.Amount is { } value
+            ? Math.Abs(value)
+            : throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy transaction {id} has no amount.");
+        var time = transaction.CreditCardMetadata?.TransactionDateTime ?? transaction.Date
+            ?? throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy transaction {id} has no date.");
+
+        var isCard = account.Kind == OpenFinanceAccountKind.CreditCard;
+        var type = isCard ? "CARD" : NormalizeType(transaction.OperationType, transaction.PaymentData?.PaymentMethod);
+        var description = FirstNonEmpty(transaction.DescriptionRaw, transaction.Description);
+
+        return new OpenFinanceTransaction(
+            SourceTransactionId: id,
+            TransactionTime: time,
+            Direction: direction,
+            Amount: amount,
+            Type: type,
+            TypeDetail: FirstNonEmpty(transaction.OperationTypeAdditionalInfo),
+            Description: description,
+            Counterparty: Counterparty(transaction, direction, isCard),
+            Pix: null, // Pluggy's v2 lines carry no Pix end-to-end id or key.
+            IsPending: string.Equals(transaction.Status, "PENDING", StringComparison.OrdinalIgnoreCase),
+            CardBillId: FirstNonEmpty(transaction.CreditCardMetadata?.BillId),
+            SourcePayload: line);
+    }
+
+    private static string NormalizeType(string? operationType, string? paymentMethod)
+    {
+        var type = FirstNonEmpty(operationType, paymentMethod)?.ToUpperInvariant();
+        return type switch
+        {
+            null => "OUTROS",
+            "OTHER" => "OUTROS",
+            _ => type,
+        };
+    }
+
+    /// <summary>The payer of a credit or the payee of a debit; for a card, the merchant.</summary>
+    private static OpenFinanceParty? Counterparty(PluggyTransaction transaction, OpenFinanceDirection direction, bool isCard)
+    {
+        var merchant = transaction.Merchant;
+        if (isCard)
+        {
+            return merchant is null
+                ? null
+                : Party(FirstNonEmpty(merchant.BusinessName, merchant.Name), merchant.Cnpj, null, null, null);
+        }
+
+        var party = direction == OpenFinanceDirection.Credit ? transaction.PaymentData?.Payer : transaction.PaymentData?.Receiver;
+        var result = party is null
+            ? null
+            : Party(party.Name, party.DocumentNumber?.Value, party.RoutingNumberIspb, party.BranchNumber, party.AccountNumber);
+        if (result is { Name: null } && merchant is not null)
+            result = result with { Name = FirstNonEmpty(merchant.BusinessName, merchant.Name) };
+        return result ?? (merchant is null ? null : Party(FirstNonEmpty(merchant.BusinessName, merchant.Name), merchant.Cnpj, null, null, null));
+    }
+
+    private static OpenFinanceParty? Party(string? name, string? document, string? ispb, string? branch, string? account)
+    {
+        var party = new OpenFinanceParty(FirstNonEmpty(name), BrazilianTaxId.TryParse(document), FirstNonEmpty(ispb), FirstNonEmpty(branch), FirstNonEmpty(account));
+        return party.IsEmpty ? null : party;
+    }
+
+    /// <summary>The <c>yyyy-mm-dd</c> part of a date Pluggy sends either as a date or as a date-time.</summary>
+    internal static DateOnly? DatePart(string? value) =>
+        value?.Trim() is { Length: >= 10 } text
+        && DateOnly.TryParseExact(text[..10], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+            ? date
+            : null;
+
+    private static string? FirstNonEmpty(params string?[] values) =>
+        values.Select(v => v?.Trim()).FirstOrDefault(v => !string.IsNullOrEmpty(v));
+
+    private static string ItemDiagnostics(PluggyItem item, Action<Utf8JsonWriter>? readFacts = null)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("itemStatus", item.Status);
+            writer.WriteString("executionStatus", item.ExecutionStatus);
+            if (item.LastUpdatedAt is { } updated)
+                writer.WriteString("lastUpdatedAtUtc", updated.ToUniversalTime());
+            if (item.Connector?.IsOpenFinance is { } isOpenFinance)
+                writer.WriteBoolean("isOpenFinance", isOpenFinance);
+            if (item.Connector?.IsSandbox is { } isSandbox)
+                writer.WriteBoolean("isSandbox", isSandbox);
+            writer.WriteString("products", string.Join(',', item.Products ?? []));
+            readFacts?.Invoke(writer);
+            writer.WriteEndObject();
+        }
+
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+}

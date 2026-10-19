@@ -17,15 +17,29 @@ banks, contributors and auditors can see exactly how data is read.
 src/
   Abstractions/          CrxMoney.Integrations.Abstractions: the plugin contract (NuGet package)
   Formats/Ofx/           File-format adapters shared by many banks (OFX first)
-  Countries/br/          Shared helpers for one country (tax ids, Pix, bank codes)
+  Countries/br/          The country package: jurisdiction rules shared by plugins (tax ids, bank codes, account operators)
   Providers/
-    br/                  Providers operating in Brazil, one folder each (e.g. br/Inter)
+    br/                  Providers operating in Brazil, one plugin folder each (br/Inter, br/OpenFinance)
     py/                  Providers operating in Paraguay
     global/              Providers not tied to one country (e.g. exchanges)
 tests/                   Mirrors src/; sanitised fixtures only
 build/                   Shared MSBuild settings, CI scripts, the fixture guard
 docs/                    Policies: versioning, releasing, fixtures, repository settings
 ```
+
+## Vocabulary
+
+| Term | Meaning | Example |
+| --- | --- | --- |
+| Provider | The channel CRX•Money reads from | Open Finance Brasil, Inter Banking API, Binance API, OFX |
+| Aggregator | A licensed intermediary that reaches a provider | Pluggy |
+| Plugin | The package implementing one provider | `CrxMoney.Integrations.Providers.Br.OpenFinance` |
+| Adapter | The code for one aggregator inside a plugin; it owns that aggregator's settings schema | the Pluggy adapter (`OpenFinance/Pluggy/`) |
+| Country package | Jurisdiction rules shared by plugins | `CrxMoney.Integrations.Countries.Br` |
+| Account operator | The institution holding the account | Banco Inter |
+
+An aggregator's "connector" (Pluggy's term) maps to an account operator; the
+word is not used here.
 
 Countries use lowercase [ISO 3166-1 alpha-2](https://www.iso.org/iso-3166-country-codes.html)
 codes. A provider lives under the country whose regulator licenses it; providers

@@ -25,4 +25,12 @@ public sealed record IntegrationSyncRequest(
     string? ApiKey = null,
     string? ApiSecret = null,
     string? Passphrase = null,
-    IReadOnlyList<IntegrationCheckpoint>? PreviousCheckpoints = null);
+    IReadOnlyList<IntegrationCheckpoint>? PreviousCheckpoints = null)
+{
+    /// <summary>
+    /// The adapter of the plugin the connection uses (the aggregator reaching the provider, for example
+    /// <c>Pluggy</c>), one of <see cref="Plugins.IntegrationConnectionAdapterSettings.AdapterId"/>.
+    /// <c>null</c> when the connection names none; a plugin with a single adapter then uses that one.
+    /// </summary>
+    public string? AdapterId { get; init; }
+}

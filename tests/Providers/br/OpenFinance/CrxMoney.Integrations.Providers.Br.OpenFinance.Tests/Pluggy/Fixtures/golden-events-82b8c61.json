@@ -1,0 +1,480 @@
+{
+  "reads": {
+    "full": [
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a01",
+        "externalAccountId": "br:077:inv:number:0001234",
+        "idempotencyKey": "brof:43dead94b32599bd19351b9ab60ae0cb",
+        "type": "deposit",
+        "amount": 5000,
+        "occurredAtUtc": "2026-09-05T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.deposit",
+        "providerDataSha256": "9be71cad25dd140d1a4d10ae65d0652f310f1bdc49e31662f7add9b6c1e4353b"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a02",
+        "externalAccountId": "br:077:inv:number:0001234",
+        "idempotencyKey": "brof:c3f5bc755ff1087ddfe4b0937e98525b",
+        "type": "withdrawal",
+        "amount": 5000.0,
+        "occurredAtUtc": "2026-09-20T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "1f597e67de552a81431f96b1c73fa860b0309d1a05aeaef14b503018e6ab5ba0"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a02#incomeTax",
+        "externalAccountId": "br:077:inv:number:0001234",
+        "idempotencyKey": "brof:ce501f4441484e705b28d890ab540773",
+        "type": "withdrawal",
+        "amount": 10,
+        "occurredAtUtc": "2026-09-20T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "5e2054c10c86e36ca39c049e0745f5ebc5386e82a86b15c12a51508a792f9cfb"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a02#iof",
+        "externalAccountId": "br:077:inv:number:0001234",
+        "idempotencyKey": "brof:92bf2ba726c16eca5ae32c90f8f583ca",
+        "type": "withdrawal",
+        "amount": 2.5,
+        "occurredAtUtc": "2026-09-20T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "dcd8981e58d1d0cf21e28c8a62d803e4f8e5ee7358ce9fe0776a6f8f625e108a"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a03",
+        "externalAccountId": "br:077:inv:code:{{CNPJ:21}}",
+        "idempotencyKey": "brof:3dac7de3de728bcb6aebebd63e99e75a",
+        "type": "deposit",
+        "amount": 2000,
+        "occurredAtUtc": "2026-10-01T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.deposit",
+        "providerDataSha256": "c9b4b0ded9c72a58d836f1b965125ed5234ca438f301ad16b77c349c7cac35ac"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a04",
+        "externalAccountId": "br:077:inv:code:{{CNPJ:21}}",
+        "idempotencyKey": "brof:7fbc568c3d5e8fa36952c8d73d0214e9",
+        "type": "deposit",
+        "amount": 15,
+        "occurredAtUtc": "2026-10-08T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.deposit",
+        "providerDataSha256": "5e52dc76a1cc44daf7a0d93211ddf4e5679d1d5096da106e10d1cd12982c393a"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a05",
+        "externalAccountId": "br:077:inv:code:{{CNPJ:21}}",
+        "idempotencyKey": "brof:6bbca28fbcef531f21667eea6959a189",
+        "type": "withdrawal",
+        "amount": 3,
+        "occurredAtUtc": "2026-10-08T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "da47bc26e95b7a7d8d12ea08b9bee45f6458336fda1ef70526d00ec9803219ba"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a06",
+        "externalAccountId": "br:077:inv:code:{{CNPJ:21}}",
+        "idempotencyKey": "brof:4095ed9304616648c6766178716c9d2b",
+        "type": "withdrawal",
+        "amount": 3,
+        "occurredAtUtc": "2026-10-08T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "a5370457edbc210823390ee0b898c8b12f5e9de1c4442ed17766e222b46cc4b7"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a07",
+        "externalAccountId": "br:077:inv:isin:BREXMPACNOR0",
+        "idempotencyKey": "brof:988f067c7d86694ddd1e99111a3c43c8",
+        "type": "deposit",
+        "amount": 483.00,
+        "occurredAtUtc": "2026-10-02T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.deposit",
+        "providerDataSha256": "c9dc4831eead98f92f9aa05e9063e52befe8d0a727756b5ef849155625b797ea"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a07#fee",
+        "externalAccountId": "br:077:inv:isin:BREXMPACNOR0",
+        "idempotencyKey": "brof:9b05ddf3d2d33da0d1f4548ced8ada42",
+        "type": "withdrawal",
+        "amount": 3.00,
+        "occurredAtUtc": "2026-10-02T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "8ed1f91eb8c6c5f2e3e4d695a49ea405b282df789b1f35a3358d22cf125a09e0"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a08",
+        "externalAccountId": "br:077:inv:isin:BREXMPACNOR0",
+        "idempotencyKey": "brof:41714ffc17c42ac500617aa6301b02f4",
+        "type": "deposit",
+        "amount": 4,
+        "occurredAtUtc": "2026-10-09T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.deposit",
+        "providerDataSha256": "41468b807f12d76f64ecbfbdf3722f26d0e0be7786bbd5d6d4b0235cd408f57b"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a08#payout",
+        "externalAccountId": "br:077:inv:isin:BREXMPACNOR0",
+        "idempotencyKey": "brof:0729229aed0366aff8b973010e6dd7aa",
+        "type": "withdrawal",
+        "amount": 4,
+        "occurredAtUtc": "2026-10-09T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "6b71590c0025b94b5887e1ae18193a1a4e3b4673ca3b7fcd44cb49781e64714c"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c01",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:6629338669da9b03d44236b3ecb77053",
+        "type": "deposit",
+        "amount": 1500,
+        "occurredAtUtc": "2026-09-01T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.deposit",
+        "providerDataSha256": "1b8852161a10ecc7e59ee017370a2425708fa8117091a08398334b62d5e06083"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c02",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:b9aae23f77ffd6fb1638281a40546ebe",
+        "type": "withdrawal",
+        "amount": 250.75,
+        "occurredAtUtc": "2026-09-02T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.withdrawal",
+        "providerDataSha256": "b00b9d0081bf14588efcac211e13fc899bdce58ea694e2d51522a359cb1d9cc8"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c03",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:400656febcb6e3bf4a524984937d1bc8",
+        "type": "withdrawal",
+        "amount": 189.9,
+        "occurredAtUtc": "2026-09-05T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.withdrawal",
+        "providerDataSha256": "69cec1acdd973a27fe4c5f6212860e7cae2b6984cde660607fb38c9a203f36d8"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c04",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:affee26f6a6514812c0755a6447bb0b6",
+        "type": "withdrawal",
+        "amount": 5000,
+        "occurredAtUtc": "2026-09-05T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.withdrawal",
+        "providerDataSha256": "f031593fa81380c6187d7d91bfa44f61f2cc32defbd3b64edc85d6dbfe2860df"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c05",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:0e2f435d7fd2ee86d5b1600e7856605d",
+        "type": "deposit",
+        "amount": 5000,
+        "occurredAtUtc": "2026-09-20T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.deposit",
+        "providerDataSha256": "ed96dcd9dccbabbd51fc06c3df9daa6ca246c939429f68ea6bd41e48a917d70d"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c06",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:3df70b039d5e2179eaefff18e552092d",
+        "type": "withdrawal",
+        "amount": 99.99,
+        "occurredAtUtc": "2026-09-22T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.withdrawal",
+        "providerDataSha256": "0e1158450409a6d843a6e8a46a2ef846c630cf1d48480656575119179a17db7a"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c07",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:e92b42872afdb6beded35d2f42b332b2",
+        "type": "withdrawal",
+        "amount": 10,
+        "occurredAtUtc": "2026-09-25T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.withdrawal",
+        "providerDataSha256": "8f77e9aac98c6164a0052dcafa96ee1d4c5b1a093a0e53159ba200a28f7dc08c"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c08",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:e47e500ab7743cec6cf973118b06ec8a",
+        "type": "withdrawal",
+        "amount": 10,
+        "occurredAtUtc": "2026-09-25T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.withdrawal",
+        "providerDataSha256": "9e6739981365f3cf4d0a18b77a11a497244905cdf2e0dd06881ead7958a5e725"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c09",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:03fb64873bb7432bdad2ddae679cbdc8",
+        "type": "withdrawal",
+        "amount": 300,
+        "occurredAtUtc": "2026-10-10T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.withdrawal",
+        "providerDataSha256": "5d7ec330b35a522bc902a7cd3bf0fe0fb6f6df969f18849f0f535f0aeb68fb79"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000d01",
+        "externalAccountId": "br:077:card:1234",
+        "idempotencyKey": "brof:a78b80c5a4290d03f08c21f88eb3ef9f",
+        "type": "withdrawal",
+        "amount": 89.9,
+        "occurredAtUtc": "2026-09-03T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.withdrawal",
+        "providerDataSha256": "f039cd92e8965dee6238b2c730dd88828feeb6f6a18ea5d37fc7919aa4e84491"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000d02",
+        "externalAccountId": "br:077:card:1234",
+        "idempotencyKey": "brof:ba7a7fab5c7aee51e846fa8b915d91c5",
+        "type": "deposit",
+        "amount": 300,
+        "occurredAtUtc": "2026-10-10T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.deposit",
+        "providerDataSha256": "d48e50c25e424d3184748af6118a1deafc184eb501719005c5cd6f8d9e22fafc"
+      }
+    ],
+    "window-2026-09-27": [
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a02",
+        "externalAccountId": "br:077:inv:number:0001234",
+        "idempotencyKey": "brof:c3f5bc755ff1087ddfe4b0937e98525b",
+        "type": "withdrawal",
+        "amount": 5000.0,
+        "occurredAtUtc": "2026-09-20T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "1f597e67de552a81431f96b1c73fa860b0309d1a05aeaef14b503018e6ab5ba0"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a02#incomeTax",
+        "externalAccountId": "br:077:inv:number:0001234",
+        "idempotencyKey": "brof:ce501f4441484e705b28d890ab540773",
+        "type": "withdrawal",
+        "amount": 10,
+        "occurredAtUtc": "2026-09-20T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "5e2054c10c86e36ca39c049e0745f5ebc5386e82a86b15c12a51508a792f9cfb"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a02#iof",
+        "externalAccountId": "br:077:inv:number:0001234",
+        "idempotencyKey": "brof:92bf2ba726c16eca5ae32c90f8f583ca",
+        "type": "withdrawal",
+        "amount": 2.5,
+        "occurredAtUtc": "2026-09-20T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "dcd8981e58d1d0cf21e28c8a62d803e4f8e5ee7358ce9fe0776a6f8f625e108a"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a03",
+        "externalAccountId": "br:077:inv:code:{{CNPJ:21}}",
+        "idempotencyKey": "brof:3dac7de3de728bcb6aebebd63e99e75a",
+        "type": "deposit",
+        "amount": 2000,
+        "occurredAtUtc": "2026-10-01T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.deposit",
+        "providerDataSha256": "c9b4b0ded9c72a58d836f1b965125ed5234ca438f301ad16b77c349c7cac35ac"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a04",
+        "externalAccountId": "br:077:inv:code:{{CNPJ:21}}",
+        "idempotencyKey": "brof:7fbc568c3d5e8fa36952c8d73d0214e9",
+        "type": "deposit",
+        "amount": 15,
+        "occurredAtUtc": "2026-10-08T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.deposit",
+        "providerDataSha256": "5e52dc76a1cc44daf7a0d93211ddf4e5679d1d5096da106e10d1cd12982c393a"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a05",
+        "externalAccountId": "br:077:inv:code:{{CNPJ:21}}",
+        "idempotencyKey": "brof:6bbca28fbcef531f21667eea6959a189",
+        "type": "withdrawal",
+        "amount": 3,
+        "occurredAtUtc": "2026-10-08T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "da47bc26e95b7a7d8d12ea08b9bee45f6458336fda1ef70526d00ec9803219ba"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a06",
+        "externalAccountId": "br:077:inv:code:{{CNPJ:21}}",
+        "idempotencyKey": "brof:4095ed9304616648c6766178716c9d2b",
+        "type": "withdrawal",
+        "amount": 3,
+        "occurredAtUtc": "2026-10-08T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "a5370457edbc210823390ee0b898c8b12f5e9de1c4442ed17766e222b46cc4b7"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a07",
+        "externalAccountId": "br:077:inv:isin:BREXMPACNOR0",
+        "idempotencyKey": "brof:988f067c7d86694ddd1e99111a3c43c8",
+        "type": "deposit",
+        "amount": 483.00,
+        "occurredAtUtc": "2026-10-02T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.deposit",
+        "providerDataSha256": "c9dc4831eead98f92f9aa05e9063e52befe8d0a727756b5ef849155625b797ea"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a07#fee",
+        "externalAccountId": "br:077:inv:isin:BREXMPACNOR0",
+        "idempotencyKey": "brof:9b05ddf3d2d33da0d1f4548ced8ada42",
+        "type": "withdrawal",
+        "amount": 3.00,
+        "occurredAtUtc": "2026-10-02T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "8ed1f91eb8c6c5f2e3e4d695a49ea405b282df789b1f35a3358d22cf125a09e0"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a08",
+        "externalAccountId": "br:077:inv:isin:BREXMPACNOR0",
+        "idempotencyKey": "brof:41714ffc17c42ac500617aa6301b02f4",
+        "type": "deposit",
+        "amount": 4,
+        "occurredAtUtc": "2026-10-09T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.deposit",
+        "providerDataSha256": "41468b807f12d76f64ecbfbdf3722f26d0e0be7786bbd5d6d4b0235cd408f57b"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a08#payout",
+        "externalAccountId": "br:077:inv:isin:BREXMPACNOR0",
+        "idempotencyKey": "brof:0729229aed0366aff8b973010e6dd7aa",
+        "type": "withdrawal",
+        "amount": 4,
+        "occurredAtUtc": "2026-10-09T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "6b71590c0025b94b5887e1ae18193a1a4e3b4673ca3b7fcd44cb49781e64714c"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c05",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:0e2f435d7fd2ee86d5b1600e7856605d",
+        "type": "deposit",
+        "amount": 5000,
+        "occurredAtUtc": "2026-09-20T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.deposit",
+        "providerDataSha256": "ed96dcd9dccbabbd51fc06c3df9daa6ca246c939429f68ea6bd41e48a917d70d"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c06",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:3df70b039d5e2179eaefff18e552092d",
+        "type": "withdrawal",
+        "amount": 99.99,
+        "occurredAtUtc": "2026-09-22T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.withdrawal",
+        "providerDataSha256": "0e1158450409a6d843a6e8a46a2ef846c630cf1d48480656575119179a17db7a"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c07",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:e92b42872afdb6beded35d2f42b332b2",
+        "type": "withdrawal",
+        "amount": 10,
+        "occurredAtUtc": "2026-09-25T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.withdrawal",
+        "providerDataSha256": "8f77e9aac98c6164a0052dcafa96ee1d4c5b1a093a0e53159ba200a28f7dc08c"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c08",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:e47e500ab7743cec6cf973118b06ec8a",
+        "type": "withdrawal",
+        "amount": 10,
+        "occurredAtUtc": "2026-09-25T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.withdrawal",
+        "providerDataSha256": "9e6739981365f3cf4d0a18b77a11a497244905cdf2e0dd06881ead7958a5e725"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c09",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:03fb64873bb7432bdad2ddae679cbdc8",
+        "type": "withdrawal",
+        "amount": 300,
+        "occurredAtUtc": "2026-10-10T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.withdrawal",
+        "providerDataSha256": "5d7ec330b35a522bc902a7cd3bf0fe0fb6f6df969f18849f0f535f0aeb68fb79"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000d02",
+        "externalAccountId": "br:077:card:1234",
+        "idempotencyKey": "brof:ba7a7fab5c7aee51e846fa8b915d91c5",
+        "type": "deposit",
+        "amount": 300,
+        "occurredAtUtc": "2026-10-10T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.deposit",
+        "providerDataSha256": "d48e50c25e424d3184748af6118a1deafc184eb501719005c5cd6f8d9e22fafc"
+      }
+    ],
+    "window-2026-10-12": [
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a04",
+        "externalAccountId": "br:077:inv:code:{{CNPJ:21}}",
+        "idempotencyKey": "brof:7fbc568c3d5e8fa36952c8d73d0214e9",
+        "type": "deposit",
+        "amount": 15,
+        "occurredAtUtc": "2026-10-08T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.deposit",
+        "providerDataSha256": "5e52dc76a1cc44daf7a0d93211ddf4e5679d1d5096da106e10d1cd12982c393a"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a05",
+        "externalAccountId": "br:077:inv:code:{{CNPJ:21}}",
+        "idempotencyKey": "brof:6bbca28fbcef531f21667eea6959a189",
+        "type": "withdrawal",
+        "amount": 3,
+        "occurredAtUtc": "2026-10-08T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "da47bc26e95b7a7d8d12ea08b9bee45f6458336fda1ef70526d00ec9803219ba"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a06",
+        "externalAccountId": "br:077:inv:code:{{CNPJ:21}}",
+        "idempotencyKey": "brof:4095ed9304616648c6766178716c9d2b",
+        "type": "withdrawal",
+        "amount": 3,
+        "occurredAtUtc": "2026-10-08T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "a5370457edbc210823390ee0b898c8b12f5e9de1c4442ed17766e222b46cc4b7"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a08",
+        "externalAccountId": "br:077:inv:isin:BREXMPACNOR0",
+        "idempotencyKey": "brof:41714ffc17c42ac500617aa6301b02f4",
+        "type": "deposit",
+        "amount": 4,
+        "occurredAtUtc": "2026-10-09T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.deposit",
+        "providerDataSha256": "41468b807f12d76f64ecbfbdf3722f26d0e0be7786bbd5d6d4b0235cd408f57b"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000a08#payout",
+        "externalAccountId": "br:077:inv:isin:BREXMPACNOR0",
+        "idempotencyKey": "brof:0729229aed0366aff8b973010e6dd7aa",
+        "type": "withdrawal",
+        "amount": 4,
+        "occurredAtUtc": "2026-10-09T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.investment.withdrawal",
+        "providerDataSha256": "6b71590c0025b94b5887e1ae18193a1a4e3b4673ca3b7fcd44cb49781e64714c"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000c09",
+        "externalAccountId": "br:077:0001:123456789",
+        "idempotencyKey": "brof:03fb64873bb7432bdad2ddae679cbdc8",
+        "type": "withdrawal",
+        "amount": 300,
+        "occurredAtUtc": "2026-10-10T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.withdrawal",
+        "providerDataSha256": "5d7ec330b35a522bc902a7cd3bf0fe0fb6f6df969f18849f0f535f0aeb68fb79"
+      },
+      {
+        "externalId": "00000000-0000-4000-8000-000000000d02",
+        "externalAccountId": "br:077:card:1234",
+        "idempotencyKey": "brof:ba7a7fab5c7aee51e846fa8b915d91c5",
+        "type": "deposit",
+        "amount": 300,
+        "occurredAtUtc": "2026-10-10T00:00:00.0000000-03:00",
+        "schemaId": "br.openfinance.transaction.deposit",
+        "providerDataSha256": "d48e50c25e424d3184748af6118a1deafc184eb501719005c5cd6f8d9e22fafc"
+      }
+    ]
+  }
+}
