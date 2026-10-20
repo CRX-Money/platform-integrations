@@ -30,6 +30,23 @@ has exactly one adapter, that adapter runs.
 | --- | --- | --- | --- |
 | Pluggy | `Pluggy` (`PluggyAdapter.Name`) | `.AddPluggy()` | `Pluggy/`, namespace `CrxMoney.Integrations.Providers.Br.OpenFinance.Pluggy` |
 
+## Changes in 1.0.0-preview.6
+
+- **Card settled balance (fix).** A bill payment the card still shows pending after
+  the paying account's debit has posted no longer raises the card's settled
+  `balance`. Preview.5 subtracted every pending line from the used limit, so a
+  pending payment credit was added back and the settled balance came out as large
+  as the bill already paid; a host that books the payment from the checking debit
+  then saw a difference it could not explain. Pending card credits that are bill
+  payments (the same rule as the `card_bill_payment` hint) now count as applied;
+  pending refunds are still left out. New card row keys after the preview.5 ones:
+  `pendingBillPayments` and `pendingBillPaymentLines`.
+- **Pending card-side bill payments pair.** The checking debit of a bill payment
+  now pairs with the card's payment credit while that credit is still pending: the
+  checking line gets the paid `card` (with `externalAccountId`) and counts as
+  `paired`, but carries no `pair`, because the pending line has no key yet.
+  Idempotency keys and amounts are unchanged.
+
 ## Moving from `CrxMoney.Integrations.Providers.Br.Pluggy`
 
 This package replaces `CrxMoney.Integrations.Providers.Br.Pluggy`, which stays at
@@ -125,6 +142,9 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   before to three days after the checking debit for card payments), and a single
   candidate account at the nearest date. A line with candidates on two accounts
   stays unpaired. Pairs only add provider data; keys and amounts do not change.
+  The card's payment credit pairs even while it is still pending (since preview.6;
+  a posted one wins at the same date): the checking debit then gets the paid
+  `card` but no `pair`, since a pending line has no key and is not sent.
 - **Investments** (schemas `br.openfinance.investment.deposit`/`.withdrawal` v1).
   A position is an account of its own, `br:{compe}:inv:{basis}:{key}`, where the
   basis says what identifies it (`number`: the institution's reference for the
@@ -181,12 +201,14 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   | Kind | `balance` | Added fields |
   | --- | --- | --- |
   | `deposit` | the balance the source reports | — |
-  | `creditCard` | **settled** amount owed: the source's figure minus the pending lines when it includes them (`OpenFinanceCardBalance.IncludesPending`) | `pendingAmount` (pending debits minus pending refunds), `pendingLines`, `balanceWithPending`, and when reported `creditLimit`, `availableCreditLimit`, `minimumPayment`, `billCloseDate`, `billDueDate` |
+  | `creditCard` | **settled** amount owed, as the host books it: the source's figure minus the pending lines when it includes them (`OpenFinanceCardBalance.IncludesPending`), minus the bill payments still pending on the card (applied: the host books them from the paying account) | `pendingAmount` (pending debits minus pending credits), `pendingLines`, `balanceWithPending`, and when reported `creditLimit`, `availableCreditLimit`, `minimumPayment`, `billCloseDate`, `billDueDate`; preview.6 adds `pendingBillPayments` (the pending card credits that are bill payments, counted as applied) and `pendingBillPaymentLines` |
   | `investment` | the position's net balance, as of `balanceAtUtc` (its reference date) | `externalAccountIdBasis`, `type`, `subtype`, `name`, `issuer`, `status`, `currencyCode`, and when reported `grossAmount`, `amountInvested`, `profit`, `incomeTax`, `financialTax`, `issueDate`, `dueDate` |
 
   A window of lines proves nothing about a balance, so comparing `balance` with
   the ledger of `externalAccountId` as of `balanceAtUtc` is the host's job. For a
-  card the settled balance is the one posted lines can prove; for a fixed-income
+  card the settled balance is the one posted lines can prove, with the bill
+  payments the host books from the paying account (`pendingBillPayments`) applied:
+  the card's events minus `pendingBillPayments` add up to it; for a fixed-income
   position the ledger lacks the accrued income (no movements), which `profit` and
   `grossAmount` describe.
 
@@ -299,12 +321,28 @@ on it). None of the `creditData` fields separates the two: `minimumPayment`,
 `balanceCloseDate` and `balanceDueDate` describe the current bill, and
 `availableCreditLimit` is the same figure seen from the other side. So the adapter
 reports `balance` as `Card.Owed` with `IncludesPending = true`, and the shared
-plugin subtracts the card's pending lines it read (debits minus pending refunds):
+plugin subtracts the card's pending lines it read (debits minus pending credits),
+except the pending bill payments.
+
+**Pending bill payments.** The card can keep the payment it received ("Pagamento
+recebido") pending for days after the checking debit has posted. The used limit
+already counts it as paid, and so does the host, which books a bill payment from
+the paying account's debit. So a pending card credit that is a bill payment (a
+credit whose description or type detail says `PAGAMENTO`, `PAGTO` or `FATURA`, the
+rule of the `card_bill_payment` hint) is treated as applied, not added back;
+pending refunds (`ESTORNO` and the like) are still left out. Example: a bill of 750
+paid from checking, its card-side credit still pending, new purchases of 155.50
+pending. Used limit 155.50, `pendingAmount` -594.50, `pendingBillPayments` 750,
+`balance` 0 (preview.5 said 750), `balanceWithPending` 155.50. The card's posted
+events (purchases of 750) less the checking payment the host books give the same 0.
+The checking debit pairs with the pending credit (`paired`), names the paid card,
+and has no `pair` until the card posts the credit.
 
 | `accounts` row field | Meaning |
 | --- | --- |
-| `balance` | settled balance owed: Pluggy's balance minus the pending lines; what the posted lines prove |
-| `pendingAmount`, `pendingLines` | the pending purchases (net of pending refunds) and how many |
+| `balance` | settled balance owed: Pluggy's balance minus the pending lines, with pending bill payments applied; what the host's ledger holds |
+| `pendingAmount`, `pendingLines` | the pending lines, debits minus credits (bill payments included), and how many |
+| `pendingBillPayments`, `pendingBillPaymentLines` | the pending card credits that are bill payments, counted as applied, and how many |
 | `balanceWithPending` | Pluggy's balance as reported |
 | `balanceAtUtc` | the item's `lastUpdatedAt` |
 | `balanceSide` | `liability` (deposit accounts and positions: `asset`) |
