@@ -106,7 +106,7 @@ public sealed class BrazilianInstitutionsTests
         { "208", "BTG Pactual", "https://www.btgpactual.com/" },
         { "102", "XP Investimentos", "https://www.xpi.com.br/" },
         { "565", "Ágora", "https://www.agorainvestimentos.com.br/" },
-        { "352", "Toro", "https://www.toroinvestimentos.com.br/" },
+        { "352", "Toro (Santander Corretora)", "https://www.toroinvestimentos.com.br/" },
     };
 
     [Theory]
