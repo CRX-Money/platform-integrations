@@ -62,6 +62,30 @@ public sealed class OpenFinanceInvestmentAndCardTests
         Assert.Equal("liability", row["balanceSide"]!.GetValue<string>());
         Assert.Equal(1000m, row["creditLimit"]!.GetValue<decimal>());
         Assert.Null(row["minimumPayment"]);
+        Assert.Equal(0m, row["pendingBillPayments"]!.GetValue<decimal>()); // the pending refund is not a bill payment
+    }
+
+    [Theory]
+    [InlineData(true, 70)]   // the used limit: the new 70 only, the bill of 100 is paid
+    [InlineData(false, 100)] // the issuer's settled figure, still waiting for the payment to post
+    public async Task A_pending_bill_payment_on_the_card_counts_as_applied(bool includesPending, int owed)
+    {
+        var card = Card with { Card = new OpenFinanceCardBalance(owed, includesPending), BalanceAt = Day };
+        var lines = new[]
+        {
+            Line("p", OpenFinanceDirection.Debit, 100m, "CARD"),
+            Line("pay", OpenFinanceDirection.Credit, 100m, "CARD", "PAGAMENTO RECEBIDO", pending: true),
+            Line("q", OpenFinanceDirection.Debit, 70m, "CARD", pending: true),
+        };
+
+        var result = await Sync(new OpenFinanceSnapshot([new OpenFinanceAccountTransactions(card, lines)], null));
+
+        var row = Diagnostics(result)["accounts"]![0]!;
+        Assert.Equal(0m, row["balance"]!.GetValue<decimal>());
+        Assert.Equal(-30m, row["pendingAmount"]!.GetValue<decimal>());
+        Assert.Equal(100m, row["pendingBillPayments"]!.GetValue<decimal>());
+        Assert.Equal(1, row["pendingBillPaymentLines"]!.GetValue<int>());
+        Assert.Equal(70m, row["balanceWithPending"]!.GetValue<decimal>());
     }
 
     [Fact]

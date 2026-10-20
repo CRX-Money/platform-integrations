@@ -19,9 +19,10 @@ namespace CrxMoney.Integrations.Providers.Br.OpenFinance;
 /// (everything when the host gives no start) and sends exactly those. The source returns every line of each
 /// booking date it covers, so key ordinals match a full read. The account balance cannot be checked against
 /// a window of lines; it is reported with its date for the host to compare with its ledger. A card's balance is
-/// reported settled (without its pending lines) with the pending amount beside it. Investment movements become
-/// events on their position's account under the same window, and sweeps and card bill payments are paired with
-/// their other side when one candidate matches (<see cref="OpenFinancePairing"/>).
+/// reported settled (without its pending lines, but with the pending bill payments it received applied) with the
+/// pending amount beside it. Investment movements become events on their position's account under the same
+/// window, and sweeps and card bill payments are paired with their other side when one candidate matches
+/// (<see cref="OpenFinancePairing"/>).
 /// </remarks>
 public abstract class OpenFinanceIntegrationPlugin
     : IIntegrationPlugin, IIntegrationImportSchemaManifestProvider, IIntegrationConnectionSettingsProvider, IIntegrationConnectionTester
@@ -234,10 +235,19 @@ public abstract class OpenFinanceIntegrationPlugin
                     OpenFinanceInvestmentMapper.CashAmount(m.Movement)!.Value, m.Movement.BookingDate, m.IsSent) { Origin = m.Investment }),
             OpenFinancePairing.InvestmentToleranceDays,
             OpenFinancePairing.InvestmentToleranceDays);
+        // A card often keeps the payment it received pending after the checking debit has posted: it still pairs, so
+        // the checking line names the card it paid, but it has no key yet and gets no pair (and is never sent).
+        var pendingCardPayments = snapshot.Accounts
+            .Where(a => a.Account.Kind == OpenFinanceAccountKind.CreditCard)
+            .SelectMany(a => a.Transactions
+                .Where(t => t.IsPending && IsBillPayment(a.Account, t))
+                .Select(t => new PreparedLine(a.Account, t, -1, $"pending|{a.Account.ExternalAccountId}|{t.SourceTransactionId}",
+                    OpenFinanceTransactionMapper.CardBillPaymentHint, IsSent: false)));
         var cardPairs = OpenFinancePairing.Match(
             lines.Where(l => l.Account.Kind == OpenFinanceAccountKind.Deposit && l.Hint == OpenFinanceTransactionMapper.CardBillPaymentHint && l.Transaction.Direction == OpenFinanceDirection.Debit)
                 .Select(l => new OpenFinancePairing.Side(l.Key, l.Account.ExternalAccountId, OpenFinanceDirection.Debit, l.Transaction.Amount, l.Transaction.BookingDate, l.IsSent)),
             lines.Where(l => l.Account.Kind == OpenFinanceAccountKind.CreditCard && l.Hint == OpenFinanceTransactionMapper.CardBillPaymentHint)
+                .Concat(pendingCardPayments)
                 .Select(l => new OpenFinancePairing.Side(l.Key, l.Account.ExternalAccountId, OpenFinanceDirection.Debit, l.Transaction.Amount, l.Transaction.BookingDate, l.IsSent) { Origin = l }),
             OpenFinancePairing.CardEarlierDays,
             OpenFinancePairing.CardLaterDays);
@@ -267,11 +277,12 @@ public abstract class OpenFinanceIntegrationPlugin
                 return new OpenFinanceLineLinks { Pair = new OpenFinancePair(position.ExternalAccountId, position.Key), Investment = (OpenFinanceInvestment)position.Origin! };
             if (cardPairs.CashToOther.TryGetValue(key, out var cardSide))
             {
-                var card = ((PreparedLine)cardSide.Origin!).Account;
-                var bill = ((PreparedLine)cardSide.Origin!).Transaction.CardBillId;
+                var cardLine = (PreparedLine)cardSide.Origin!;
+                var card = cardLine.Account;
+                var bill = cardLine.Transaction.CardBillId;
                 return new OpenFinanceLineLinks
                 {
-                    Pair = new OpenFinancePair(cardSide.ExternalAccountId, cardSide.Key),
+                    Pair = cardLine.Transaction.IsPending ? null : new OpenFinancePair(cardSide.ExternalAccountId, cardSide.Key),
                     PaidCard = new OpenFinanceCardReference(BrazilianBankAccount.NormalizeCompe(card.IssuerCompe!), card.CardLast4!, bill),
                 };
             }
@@ -326,8 +337,10 @@ public abstract class OpenFinanceIntegrationPlugin
 
     /// <summary>
     /// One <c>accounts</c> row. A window of lines proves nothing about a deposit balance, so it is reported for the
-    /// host to compare with its ledger. A card's reported balance is split into the settled balance (what its posted
-    /// lines prove: the reported amount minus the pending lines it includes) and the pending amount.
+    /// host to compare with its ledger. A card's reported balance is split into the settled balance and the pending
+    /// amount. The settled balance is what the host's ledger holds: the reported amount minus the pending lines it
+    /// includes, except pending bill payments the card has received, which count as applied because the host books
+    /// a bill payment from the paying account's debit (<c>pendingBillPayments</c> says how much).
     /// </summary>
     private static void WriteAccountReport(Utf8JsonWriter writer, OpenFinanceAccount account, IReadOnlyList<OpenFinanceTransaction> transactions, int sent)
     {
@@ -349,19 +362,24 @@ public abstract class OpenFinanceIntegrationPlugin
         {
             var pendingLines = transactions.Where(t => t.IsPending).ToList();
             var pendingAmount = pendingLines.Sum(t => t.Direction == OpenFinanceDirection.Debit ? t.Amount : -t.Amount);
-            var settled = card.IncludesPending ? card.Owed - pendingAmount : card.Owed;
+            var billPayments = pendingLines.Where(t => IsBillPayment(account, t)).ToList();
+            var billPaymentAmount = billPayments.Sum(t => t.Amount);
+            var withoutPending = card.IncludesPending ? card.Owed - pendingAmount : card.Owed;
+            var settled = withoutPending - billPaymentAmount;
             writer.WriteNumber("balance", settled);
             if (account.BalanceAt is { } balanceAt)
                 writer.WriteString("balanceAtUtc", balanceAt.ToUniversalTime());
             writer.WriteString("balanceSide", "liability");
             writer.WriteNumber("pendingAmount", pendingAmount);
             writer.WriteNumber("pendingLines", pendingLines.Count);
-            writer.WriteNumber("balanceWithPending", settled + pendingAmount);
+            writer.WriteNumber("balanceWithPending", withoutPending + pendingAmount);
             WriteOptionalNumber(writer, "creditLimit", card.CreditLimit);
             WriteOptionalNumber(writer, "availableCreditLimit", card.AvailableCreditLimit);
             WriteOptionalNumber(writer, "minimumPayment", card.MinimumPayment);
             WriteOptionalDate(writer, "billCloseDate", card.BillCloseDate);
             WriteOptionalDate(writer, "billDueDate", card.BillDueDate);
+            writer.WriteNumber("pendingBillPayments", billPaymentAmount);
+            writer.WriteNumber("pendingBillPaymentLines", billPayments.Count);
         }
 
         WriteOptionalString(writer, "institutionWebsite", account.InstitutionWebsite);
@@ -426,6 +444,12 @@ public abstract class OpenFinanceIntegrationPlugin
         if (!string.IsNullOrWhiteSpace(value))
             writer.WriteString(name, value.Trim());
     }
+
+    /// <summary>A bill payment the card received, by the same rule as the bill-payment pairs (<see cref="OpenFinanceTransactionMapper.TransferHint"/>).</summary>
+    private static bool IsBillPayment(OpenFinanceAccount card, OpenFinanceTransaction transaction) =>
+        card.Kind == OpenFinanceAccountKind.CreditCard
+        && transaction.Direction == OpenFinanceDirection.Credit
+        && OpenFinanceTransactionMapper.TransferHint(card, transaction) == OpenFinanceTransactionMapper.CardBillPaymentHint;
 
     private sealed record PreparedLine(OpenFinanceAccount Account, OpenFinanceTransaction Transaction, int Ordinal, string Key, string? Hint, bool IsSent);
 

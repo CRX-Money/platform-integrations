@@ -288,6 +288,139 @@ public sealed class PluggyInvestmentAndCardTests
         Assert.Equal(89.9m, card["balance"]!.GetValue<decimal>());
     }
 
+    /// <summary>
+    /// A card with a limit of 3000 whose lines are <paramref name="cardLines"/>; Pluggy's <c>balance</c> is the used
+    /// limit (<paramref name="usedLimit"/>), as on Open Finance connectors. The checking account's lines are
+    /// <paramref name="bankLines"/>.
+    /// </summary>
+    private static FakePluggyServer CardServer(decimal usedLimit, JsonObject[] cardLines, params JsonObject[] bankLines)
+    {
+        var server = FakePluggyServer.WithFixtures().On("/accounts", (_, _) =>
+        {
+            var accounts = JsonNode.Parse(Fixtures.Text("accounts.json"))!;
+            var card = accounts["results"]![1]!;
+            card["balance"] = usedLimit;
+            card["creditData"]!["creditLimit"] = 3000m;
+            card["creditData"]!["availableCreditLimit"] = 3000m - usedLimit;
+            return FakePluggyServer.Json(accounts.ToJsonString());
+        });
+        server.CardLines = new JsonArray([.. cardLines]);
+        server.BankLines = new JsonArray([.. bankLines]);
+        return server;
+    }
+
+    private static JsonObject Line(string accountId, string id, string date, string type, decimal amount, string description,
+        string status = "POSTED", bool card = true) => new()
+    {
+        ["id"] = $"00000000-0000-4000-8000-0000000007{id}",
+        ["accountId"] = accountId,
+        ["date"] = $"{date}T12:00:00.000Z",
+        ["description"] = description,
+        ["descriptionRaw"] = description,
+        // Pluggy's card amounts carry the opposite sign to checking.
+        ["amount"] = (type == "DEBIT") == card ? amount : -amount,
+        ["currencyCode"] = "BRL",
+        ["type"] = type,
+        ["status"] = status,
+        ["operationType"] = card ? "PAGAMENTO" : "BOLETO",
+        ["creditCardMetadata"] = card ? new JsonObject { ["cardNumber"] = "1234", ["transactionDateTime"] = $"{date}T12:00:00.000Z" } : null,
+    };
+
+    private static JsonObject CardLine(string id, string date, string type, decimal amount, string description, string status = "POSTED") =>
+        Line(FakePluggyServer.CardAccountId, id, date, type, amount, description, status);
+
+    /// <summary>The bill of 750 (500 + 250 bought in September) paid from checking on 5 October.</summary>
+    private static JsonObject CheckingBillPayment() =>
+        Line(FakePluggyServer.BankAccountId, "c1", "2026-10-05", "DEBIT", 750m, "PAGAMENTO FATURA CARTAO", card: false);
+
+    private static JsonObject[] PaidBillWithNewPurchases(string paymentStatus) =>
+    [
+        CardLine("01", "2026-09-08", "DEBIT", 500m, "COMPRA EXEMPLO A"),
+        CardLine("02", "2026-09-20", "DEBIT", 250m, "COMPRA EXEMPLO B"),
+        CardLine("03", "2026-10-06", "CREDIT", 750m, "PAGAMENTO RECEBIDO", paymentStatus),
+        CardLine("04", "2026-10-09", "DEBIT", 120m, "COMPRA EXEMPLO C", "PENDING"),
+        CardLine("05", "2026-10-12", "DEBIT", 35.5m, "COMPRA EXEMPLO D", "PENDING"),
+    ];
+
+    private static decimal Number(JsonNode row, string name) => row[name]!.GetValue<decimal>();
+
+    /// <summary>The card's posted events as owed: purchases minus credits.</summary>
+    private static decimal PostedNet(IntegrationSyncResult result) => result.ImportEvents
+        .Where(e => e.ExternalAccountId == CardAccountKey)
+        .Sum(e => e.Type == OpenFinanceTransactionMapper.WithdrawalType ? e.Amount!.Value : -e.Amount!.Value);
+
+    [Theory]
+    [InlineData("PENDING")] // the card still shows the payment pending after the checking debit posted
+    [InlineData("POSTED")]
+    public async Task A_bill_paid_from_checking_counts_as_applied_whether_or_not_the_card_has_posted_it(string paymentStatus)
+    {
+        // Used limit 155.50: only the new purchases, the bill is paid.
+        var result = await FullSync(CardServer(155.5m, PaidBillWithNewPurchases(paymentStatus), CheckingBillPayment()));
+
+        var card = Row(result, CardAccountKey);
+        var pendingPayment = paymentStatus == "PENDING";
+        Assert.Equal(0m, Number(card, "balance"));
+        Assert.Equal(155.5m, Number(card, "balanceWithPending"));
+        Assert.Equal(pendingPayment ? 155.5m - 750m : 155.5m, Number(card, "pendingAmount"));
+        Assert.Equal(pendingPayment ? 3 : 2, card["pendingLines"]!.GetValue<int>());
+        Assert.Equal(pendingPayment ? 750m : 0m, Number(card, "pendingBillPayments"));
+        Assert.Equal(pendingPayment ? 1 : 0, card["pendingBillPaymentLines"]!.GetValue<int>());
+
+        // The host books the purchases from the card and the payment from the checking debit (or the posted card
+        // line, which pairs with it): either way its card ledger owes 0, the settled balance.
+        Assert.Equal(pendingPayment ? 750m : 0m, PostedNet(result));
+        var checking = Data(result.ImportEvents.Single(e => e.ExternalAccountId == BankAccountKey));
+        Assert.Equal(CardAccountKey, checking["card"]!["externalAccountId"]!.GetValue<string>());
+        // A pending card side has no key yet: the checking line names the card it paid but carries no pair.
+        Assert.Equal(!pendingPayment, checking["pair"] is not null);
+        var pairs = Diagnostics(result)["transferPairs"]!["cardBillPayment"]!;
+        Assert.Equal([1, 1, 0, 0, 0], new[] { "lines", "paired", "ambiguous", "unmatched", "cardSideUnpaired" }.Select(k => pairs[k]!.GetValue<int>()));
+    }
+
+    [Fact]
+    public async Task A_pending_refund_is_not_a_bill_payment_and_stays_out_of_the_settled_balance()
+    {
+        var lines = new[]
+        {
+            CardLine("01", "2026-10-01", "DEBIT", 200m, "COMPRA EXEMPLO A"),
+            CardLine("02", "2026-10-09", "DEBIT", 50m, "COMPRA EXEMPLO B", "PENDING"),
+            CardLine("03", "2026-10-10", "CREDIT", 20m, "ESTORNO COMPRA EXEMPLO", "PENDING"),
+        };
+
+        var result = await FullSync(CardServer(230m, lines));
+
+        var card = Row(result, CardAccountKey);
+        Assert.Equal(200m, Number(card, "balance"));
+        Assert.Equal(200m, PostedNet(result));
+        Assert.Equal((30m, 2), (Number(card, "pendingAmount"), card["pendingLines"]!.GetValue<int>()));
+        Assert.Equal((0m, 0), (Number(card, "pendingBillPayments"), card["pendingBillPaymentLines"]!.GetValue<int>()));
+        Assert.Equal(230m, Number(card, "balanceWithPending"));
+    }
+
+    [Fact]
+    public async Task A_card_with_no_pending_lines_owes_its_posted_balance()
+    {
+        var result = await FullSync(CardServer(200m, [CardLine("01", "2026-10-01", "DEBIT", 200m, "COMPRA EXEMPLO A")]));
+
+        var card = Row(result, CardAccountKey);
+        Assert.Equal((200m, 200m), (Number(card, "balance"), Number(card, "balanceWithPending")));
+        Assert.Equal((0m, 0m), (Number(card, "pendingAmount"), Number(card, "pendingBillPayments")));
+        Assert.Equal(0, card["pendingLines"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task A_pending_card_payment_without_a_checking_debit_still_counts_as_applied()
+    {
+        // Paid from an account outside this connection, which the host books from that account's side.
+        var result = await FullSync(CardServer(155.5m, PaidBillWithNewPurchases("PENDING")));
+
+        var card = Row(result, CardAccountKey);
+        Assert.Equal(0m, Number(card, "balance"));
+        Assert.Equal(750m, Number(card, "pendingBillPayments"));
+        var pairs = Diagnostics(result)["transferPairs"]!["cardBillPayment"]!;
+        Assert.Equal([0, 0, 0, 0, 0], new[] { "lines", "paired", "ambiguous", "unmatched", "cardSideUnpaired" }.Select(k => pairs[k]!.GetValue<int>()));
+    }
+
     [Fact]
     public async Task An_item_without_the_investments_product_reads_no_positions()
     {

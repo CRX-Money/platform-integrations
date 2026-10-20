@@ -92,6 +92,8 @@ public sealed class PluggyIntegrationPluginTests
         Assert.Equal(13.19m, card["minimumPayment"]!.GetValue<decimal>());
         Assert.Equal("2026-10-13", card["billCloseDate"]!.GetValue<string>());
         Assert.Equal("2026-10-20", card["billDueDate"]!.GetValue<string>());
+        Assert.Equal(0m, card["pendingBillPayments"]!.GetValue<decimal>());
+        Assert.Equal(0, card["pendingBillPaymentLines"]!.GetValue<int>());
 
         // The preview.4 keys keep their names and order; new keys only follow them.
         Assert.Equal(
@@ -100,7 +102,7 @@ public sealed class PluggyIntegrationPluginTests
         Assert.Equal(
             ["kind", "externalAccountId", "lines", "posted", "sent", "balance", "balanceAtUtc", "balanceSide",
              "pendingAmount", "pendingLines", "balanceWithPending", "creditLimit", "availableCreditLimit", "minimumPayment", "billCloseDate", "billDueDate",
-             "institutionWebsite"],
+             "pendingBillPayments", "pendingBillPaymentLines", "institutionWebsite"],
             card.AsObject().Select(p => p.Key));
         // COMPE 077 is in the package's institution list; the card's issuer is the item's bank.
         Assert.Equal("https://inter.co/", bank["institutionWebsite"]!.GetValue<string>());

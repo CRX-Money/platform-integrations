@@ -181,7 +181,8 @@ public sealed record OpenFinanceAccountTransactions(OpenFinanceAccount Account, 
 /// <summary>
 /// What a card owes as its issuer reports it. Open Finance issuers report the <b>used limit</b>, which includes
 /// purchases that are authorised but not yet posted; the plugin subtracts the card's pending lines to get the
-/// settled balance, the one its posted lines prove.
+/// settled balance, the one the host's ledger holds. A bill payment the card still shows pending is the exception:
+/// the host books it from the paying account's debit, so it counts as applied.
 /// </summary>
 /// <param name="Owed">The amount the issuer reports as owed (positive = owed by the holder).</param>
 /// <param name="IncludesPending">True when <paramref name="Owed"/> already contains the pending lines (the used limit).</param>

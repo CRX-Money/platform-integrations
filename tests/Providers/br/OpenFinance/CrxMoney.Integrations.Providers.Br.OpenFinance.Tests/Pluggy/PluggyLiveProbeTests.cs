@@ -55,7 +55,8 @@ public sealed class PluggyLiveProbeTests
             windowed.ImportEvents.Select(e => e.IdempotencyKey).Order());
 
         // On a full read, an account's events still add up to the balance reported: credits minus debits for a deposit
-        // account, debits minus credits (what is owed) for a card's settled balance. A position's events usually do not:
+        // account, debits minus credits (what is owed) for a card's settled balance, less the bill payments still pending
+        // on the card (the host books them from the paying account's debit). A position's events usually do not:
         // fixed income accrues without movements, so its check is reported, not asserted.
         var diagnostics = JsonNode.Parse(result.ProviderDiagnosticsJson!)!;
         var rows = diagnostics["accounts"]!.AsArray().Select(a => a!).ToList();
@@ -63,7 +64,8 @@ public sealed class PluggyLiveProbeTests
             .Where(e => e.ExternalAccountId == row["externalAccountId"]!.GetValue<string>())
             .Sum(e => e.Type == "deposit" ? e.Amount!.Value : -e.Amount!.Value);
         string Kind(JsonNode row) => row["kind"]!.GetValue<string>();
-        bool Reconciles(JsonNode row) => (Kind(row) == "creditCard" ? -Net(row) : Net(row)) == row["balance"]!.GetValue<decimal>();
+        bool Reconciles(JsonNode row) =>
+            (Kind(row) == "creditCard" ? -Net(row) - row["pendingBillPayments"]!.GetValue<decimal>() : Net(row)) == row["balance"]!.GetValue<decimal>();
         var reconciles = rows.Where(r => Kind(r) == "deposit" && r["balance"] is not null).Select(Reconciles).ToList();
         var cardReconciles = rows.Where(r => Kind(r) == "creditCard" && r["balance"] is not null).Select(Reconciles).ToList();
         var investmentRows = rows.Where(r => Kind(r) == "investment").ToList();
@@ -86,7 +88,7 @@ public sealed class PluggyLiveProbeTests
             $"windowed={windowed.ImportEvents.Count} sentFrom={sentFrom:yyyy-MM-dd}",
             $"depositBalanceMatchesFullNet=[{string.Join(", ", reconciles)}]",
             $"cardSettledMatchesFullNet=[{string.Join(", ", cardReconciles)}]",
-            $"cards=[{string.Join(", ", rows.Where(r => Kind(r) == "creditCard").Select(r => $"pendingLines:{r["pendingLines"]?.GetValue<int>()} limit:{r["creditLimit"] is not null} due:{r["billDueDate"] is not null}"))}]",
+            $"cards=[{string.Join(", ", rows.Where(r => Kind(r) == "creditCard").Select(r => $"pendingLines:{r["pendingLines"]?.GetValue<int>()} limit:{r["creditLimit"] is not null} due:{r["billDueDate"] is not null} pendingBillPaymentLines:{r["pendingBillPaymentLines"]?.GetValue<int>()}"))}]",
             $"positions={investmentRows.Count} [{string.Join(", ", investmentRows.GroupBy(r => $"{r["type"]}/{r["subtype"]}/{r["externalAccountIdBasis"]}/{r["status"]}").OrderBy(g => g.Key, StringComparer.Ordinal).Select(g => $"{g.Key}:{g.Count()}"))}]",
             $"positionBalanceMatchesFullNet=[{string.Join(", ", investmentRows.Select(Reconciles))}]",
             $"movements=[{string.Join(", ", investmentData.GroupBy(d => $"{d["operation"]}{(d["component"] is { } c ? "#" + c : string.Empty)}").OrderBy(g => g.Key, StringComparer.Ordinal).Select(g => $"{g.Key}:{g.Count()}"))}]",
@@ -113,7 +115,7 @@ public sealed class PluggyLiveProbeTests
     private static string Redact(string? diagnostics) => diagnostics is null
         ? "none"
         : System.Text.RegularExpressions.Regex.Replace(diagnostics,
-            "\"(lastUpdatedAtUtc|credentialExpiresAtUtc|balanceAtUtc|externalAccountId|balance|pendingAmount|balanceWithPending|creditLimit"
+            "\"(lastUpdatedAtUtc|credentialExpiresAtUtc|balanceAtUtc|externalAccountId|balance|pendingAmount|balanceWithPending|pendingBillPayments|creditLimit"
             + "|availableCreditLimit|minimumPayment|billCloseDate|billDueDate|name|issuer|grossAmount|amountInvested|profit|incomeTax"
             + "|financialTax|issueDate|dueDate|transactionsDateFrom|cardTransactionsDateFrom|sentFrom)\":(\"[^\"]*\"|-?[0-9.]+)", "\"$1\":\"<set>\"");
 }

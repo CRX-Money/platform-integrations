@@ -61,6 +61,12 @@ internal sealed class FakePluggyServer : HttpMessageHandler
     /// <summary>Lines per <c>/v2/transactions</c> page; Pluggy's default is 500.</summary>
     public int TransactionPageSize { get; set; } = 500;
 
+    /// <summary>The card's lines in place of <c>transactions-card.json</c>, as a fixture's <c>results</c>; null serves the fixture.</summary>
+    public JsonArray? CardLines { get; set; }
+
+    /// <summary>The bank account's lines in place of <c>transactions-bank.json</c>; null serves the fixture.</summary>
+    public JsonArray? BankLines { get; set; }
+
     /// <summary>Results per <c>/investments</c> and <c>/investments/{id}/transactions</c> page when the client sends no <c>pageSize</c>; Pluggy's default is 500.</summary>
     public int InvestmentPageSize { get; set; } = 500;
 
@@ -103,7 +109,9 @@ internal sealed class FakePluggyServer : HttpMessageHandler
             offset = cursor.Offset;
         }
 
-        var lines = JsonNode.Parse(Fixtures.Text(fixture))!["results"]!.AsArray()
+        var all = (accountId == CardAccountId ? CardLines : BankLines)
+            ?? JsonNode.Parse(Fixtures.Text(fixture))!["results"]!.AsArray();
+        var lines = all
             .Where(line =>
             {
                 var date = DateOnly.FromDateTime(DateTimeOffset.Parse(line!["date"]!.GetValue<string>(), CultureInfo.InvariantCulture).UtcDateTime);
