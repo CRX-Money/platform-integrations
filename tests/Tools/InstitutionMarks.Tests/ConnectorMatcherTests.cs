@@ -108,6 +108,62 @@ public sealed class ConnectorMatcherTests
     }
 
     [Fact]
+    public void A_name_is_compared_without_spaces_and_without_its_explanation_in_parentheses()
+    {
+        var btg = Institution("BTG Pactual", "https://www.btgpactual.com/", "208");
+        var toro = Institution("Toro (Santander Corretora)", "https://www.toroinvestimentos.com.br/", "352", "00000352");
+        var connectors = new[]
+        {
+            Connector(214, "BTGPactual", null),
+            Connector(796, "Toro Investimentos", null),
+            Connector(797, "Toro Investimentos Empresas", null),
+        };
+
+        var matches = ConnectorMatcher.Match([btg, toro], connectors, new Dictionary<string, int>());
+
+        Assert.Equal((MatchMethod.NameCompact, 214), (matches[0].Method, matches[0].Connector!.Id));
+        Assert.Equal((MatchMethod.NamePrefix, 796), (matches[1].Method, matches[1].Connector!.Id));
+    }
+
+    [Fact]
+    public void A_personal_connector_wins_over_a_business_one_of_the_same_name()
+    {
+        var inter = Institution("Inter", "https://inter.co/");
+        var connectors = new[]
+        {
+            new PluggyConnector(825, "Inter", null, "https://cdn.example/a.svg", "BR", "business", false),
+            new PluggyConnector(823, "Inter", null, "https://cdn.example/b.svg", "BR", "regulado", false),
+        };
+
+        Assert.Equal(823, Assert.Single(ConnectorMatcher.Match([inter], connectors, new Dictionary<string, int>())).Connector!.Id);
+    }
+
+    [Fact]
+    public void An_alias_pins_the_connector_and_a_stale_alias_is_reported_unmatched()
+    {
+        var caixa = Institution("Caixa", "https://www.caixa.gov.br/", "104");
+        var connectors = new[]
+        {
+            Connector(783, "Caixa Tem", null),
+            Connector(619, "Caixa Econômica Federal", null),
+        };
+
+        var pinned = Assert.Single(ConnectorMatcher.Match([caixa], connectors, new Dictionary<string, int> { ["104"] = 619 }));
+        var withoutAlias = Assert.Single(ConnectorMatcher.Match([caixa], connectors, new Dictionary<string, int>()));
+        var stale = Assert.Single(ConnectorMatcher.Match([caixa], connectors, new Dictionary<string, int> { ["104"] = 1 }));
+
+        Assert.Equal((MatchMethod.Alias, 619), (pinned.Method, pinned.Connector!.Id));
+        Assert.Equal(783, withoutAlias.Connector!.Id); // what the name rule alone would pick: why the alias exists
+        Assert.Equal(MatchMethod.None, stale.Method);
+    }
+
+    [Fact]
+    public void Every_alias_names_a_listed_institution()
+    {
+        Assert.All(ConnectorMatcher.Aliases.Keys, compe => Assert.NotNull(BrazilianInstitutions.Find(compe)));
+    }
+
+    [Fact]
     public void Every_listed_institution_can_be_matched_against_its_own_website()
     {
         var connectors = BrazilianInstitutions.All

@@ -160,26 +160,35 @@ if (BrazilianInstitutionMarks.TryOpen(institution!.Ispb, out var stream, out var
 
 ### Where the marks come from
 
-Each file is the image of the matching Brazilian connector in
-[Pluggy](https://pluggy.ai)'s public connector list (`GET /connectors`, the
-`imageUrl` field), the aggregator the Open Finance plugin uses. The matching
-connector is found by website host first and by name second.
-`Marks/marks-manifest.json` records, per file: the institution (ISPB and COMPE),
-the connector id and name, how it matched, the source URL, the media type, the
-size, the SHA-256 and the UTC capture time. Its `monogram` list names every
-institution without a mark and why. A test checks that the manifest, the
-embedded files and the institution list agree, so an institution is never in
-both lists, and never in neither.
+Each file is the icon of the matching Brazilian connector of [Pluggy](https://pluggy.ai), the aggregator the
+Open Finance plugin uses, downloaded from Pluggy's public CDN (`cdn.pluggy.ai/assets/connector-icons/`). No
+key is needed: the connector list (id, name, type, icon address) is the public status page
+<https://status.pluggy.ai/>, which is also where each mapping is recorded as coming from.
+`Marks/marks-manifest.json` records, per file: the institution (ISPB and COMPE), the connector id and name,
+how it matched (`matchedBy`), the page the mapping came from (`mappedFrom`), the file's source URL, the media
+type, the size, the SHA-256 and the UTC capture time. Its `monogram` list names every institution without a
+mark and why. A test checks that the manifest, the embedded files and the institution list agree, so an
+institution is never in both lists, and never in neither.
 
-`tools/InstitutionMarks` refreshes all of it. It needs a Pluggy client id and
-secret, from the environment or `dotnet user-secrets` (never written anywhere), and prints a match report:
+The status page has no institution websites, so institutions are matched to connectors by name: exactly
+(without accents, case or punctuation), ignoring spaces (`BTGPactual`), or as the start of the connector's name
+(`Toro` is `Toro Investimentos`); a personal connector wins over a business one. A short reviewed alias table in
+the tool (`ConnectorMatcher.Aliases`) pins the few that name rules cannot find or would get wrong (Caixa, Agibank,
+QI Tech, Banco BV, Sofisa). With credentials, `--source api` reads `GET /connectors` instead, which also
+carries each connector's `institutionUrl` and so matches by website first.
+
+`tools/InstitutionMarks` refreshes all of it and prints a match report, with no credentials needed:
 
 ```
-CRX_PLUGGY_CLIENT_ID=... CRX_PLUGGY_CLIENT_SECRET=... dotnet run --project tools/InstitutionMarks
-dotnet run --project tools/InstitutionMarks -- --dry-run   # report only, writes nothing
-dotnet user-secrets set CRX_PLUGGY_CLIENT_ID "..." --project tools/InstitutionMarks   # instead of the environment variables
+dotnet run --project tools/InstitutionMarks                    # public listing, or the API when credentials are set
+dotnet run --project tools/InstitutionMarks -- --dry-run       # report only, writes nothing
+dotnet run --project tools/InstitutionMarks -- --source api    # needs CRX_PLUGGY_CLIENT_ID and CRX_PLUGGY_CLIENT_SECRET
+dotnet user-secrets set CRX_PLUGGY_CLIENT_ID "..." --project tools/InstitutionMarks   # instead of environment variables
 ```
 
+A downloaded image is kept only when it is SVG or PNG, at most 256 KB, and (for SVG) free of script,
+event handlers, `foreignObject` and external references; otherwise the institution stays a monogram and the
+report says why.
 ### Trademarks and removal
 
 The marks are trademarks of their owners and are **not** covered by this

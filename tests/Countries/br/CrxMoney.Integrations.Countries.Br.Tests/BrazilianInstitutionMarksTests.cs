@@ -75,16 +75,20 @@ public sealed class BrazilianInstitutionMarksTests
         if (marks.Count == 0)
             return; // Nothing captured yet; the monogram list covers everyone.
 
-        Assert.Equal("https://api.pluggy.ai/connectors", manifest["source"]!.GetValue<string>());
+        Assert.True(DateTimeOffset.TryParse(manifest["capturedAt"]!.GetValue<string>(), out _));
         Assert.All(marks, m =>
         {
+            // The public page (or API listing) the mapping came from, and the CDN file it points to.
+            var mappedFrom = new Uri(m["mappedFrom"]!.GetValue<string>(), UriKind.Absolute);
+            Assert.Equal(Uri.UriSchemeHttps, mappedFrom.Scheme);
+            Assert.Contains(m["mappedFrom"]!.GetValue<string>(), new[] { "https://status.pluggy.ai/", "https://api.pluggy.ai/connectors" });
             Assert.True(m["connectorId"]!.GetValue<int>() > 0);
             Assert.False(string.IsNullOrWhiteSpace(m["connectorName"]!.GetValue<string>()));
             var source = new Uri(m["sourceUrl"]!.GetValue<string>(), UriKind.Absolute);
             Assert.Equal(Uri.UriSchemeHttps, source.Scheme);
             Assert.True(DateTimeOffset.TryParseExact(m["capturedAt"]!.GetValue<string>(), "yyyy-MM-dd'T'HH:mm:ss'Z'",
                 System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out _));
-            Assert.Contains(m["matchedBy"]!.GetValue<string>(), new[] { "website", "name", "nameprefix" });
+            Assert.Contains(m["matchedBy"]!.GetValue<string>(), new[] { "website", "alias", "name", "namecompact", "nameprefix" });
         });
     }
 
