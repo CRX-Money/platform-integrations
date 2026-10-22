@@ -133,6 +133,42 @@ public sealed class OpenFinanceMappingTests
         Assert.Equal(expected, OpenFinanceTransactionMapper.TransferHint(Checking, Line("h", direction, 1m, type: type, detail: detail)));
     }
 
+    [Theory]
+    [InlineData("Saída", "Saída COR ITAUCOR LIQUIDACAO", OpenFinanceDirection.Debit)]
+    [InlineData("Saída", "Saída COR ITAUCOR LIQ. PARCIAL", OpenFinanceDirection.Debit)]
+    [InlineData("Saída", "Saída COR ITAUCOR COMPRA TD", OpenFinanceDirection.Debit)]
+    [InlineData("Entrada", "Entrada COR OPERACOES B3 21/09", OpenFinanceDirection.Credit)]
+    [InlineData("Saída", "Saída COR OPERACOES B3", OpenFinanceDirection.Debit)]
+    [InlineData("Saída", "Saída COR IRRF ETF", OpenFinanceDirection.Debit)]
+    [InlineData(null, "COR ITAUCOR LIQUIDACAO", OpenFinanceDirection.Debit)]
+    [InlineData(null, "LIQUIDACAO OPERACOES B3", OpenFinanceDirection.Credit)]
+    [InlineData(null, "IRRF ETF EXEMPLO", OpenFinanceDirection.Debit)]
+    public void Brokerage_settlements_are_investment_flows(string? detail, string description, OpenFinanceDirection direction)
+    {
+        // The aggregator categorises these as card payments or dividends; they move money to and from the brokerage.
+        Assert.Equal("investment", OpenFinanceTransactionMapper.TransferHint(Checking, Line("h", direction, 1m, type: "OUTROS", detail: detail, description: description)));
+    }
+
+    [Theory]
+    [InlineData("Saída", "Saída CORRETORA EXEMPLO")]
+    [InlineData("Saída", "Saída PIX COR EXEMPLO")]
+    [InlineData(null, "COMPRA LOJA OPERACOES")]
+    [InlineData(null, "IRRF SALARIO")]
+    public void Lines_that_only_resemble_brokerage_settlements_get_no_hint(string? detail, string description)
+    {
+        Assert.Null(OpenFinanceTransactionMapper.TransferHint(Checking, Line("h", OpenFinanceDirection.Debit, 1m, type: "OUTROS", detail: detail, description: description)));
+    }
+
+    [Fact]
+    public void A_brokerage_settlement_is_mapped_as_an_investment_sweep()
+    {
+        var data = JsonNode.Parse(OpenFinanceTransactionMapper.Map(
+            Checking, Line("s", OpenFinanceDirection.Debit, 150m, type: "OUTROS", detail: "Saída", description: "Saída COR ITAUCOR LIQUIDACAO"), 0, "A").ProviderData!)!;
+
+        Assert.Equal("investment", data["transferHint"]!.GetValue<string>());
+        Assert.NotNull(data["investment"]);
+    }
+
     [Fact]
     public void A_card_payment_received_is_the_other_side_of_the_bill_payment()
     {
