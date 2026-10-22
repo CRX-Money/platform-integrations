@@ -127,7 +127,11 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   ISPB, branch, account; replaced by `counterpartyIsHolder: true` when the other
   side is the account holder itself, as in sweeps), `pix` when present, `card`
   (last four, bill, `issuerCompe`), a `transferHint` (`investment` for automatic
-  CDB sweeps and similar, `card_bill_payment`), and the aggregator's raw line as
+  CDB sweeps and similar, and for settlements with the bank's own brokerage such
+  as "Saída COR ITAUCOR LIQUIDACAO" or "Entrada COR OPERACOES B3", which
+  aggregators categorise as card payments or dividends; tax the brokerage
+  withholds, "Saída COR IRRF ETF", gets none;
+  `card_bill_payment`), and the aggregator's raw line as
   `sourcePayload`. Added in preview.5, all optional:
   - on a checking line with the `investment` hint, `investment` (`product`: the
     `CDB`/`LCA`/`LCI`/`POUPANCA` the line names; when paired, the position's

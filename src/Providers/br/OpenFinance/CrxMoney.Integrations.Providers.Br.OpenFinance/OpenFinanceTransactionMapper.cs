@@ -110,7 +110,8 @@ public static class OpenFinanceTransactionMapper
 
     /// <summary>
     /// Recognises transfer-like lines the bank does not type as transfers: automatic investment sweeps
-    /// (aplicação/resgate of CDBs and similar, often typed <c>OUTROS</c>) and card bill payments.
+    /// (aplicação/resgate of CDBs and similar, often typed <c>OUTROS</c>), settlements with the bank's own brokerage,
+    /// and card bill payments.
     /// </summary>
     public static string? TransferHint(OpenFinanceAccount account, OpenFinanceTransaction transaction)
     {
@@ -127,7 +128,33 @@ public static class OpenFinanceTransactionMapper
         // Whole words only: "APLICATIVO" is an app purchase, "APL AUTOMATICA CDB" is a sweep.
         if (type is "OUTROS" or "OTHER" && (words.Overlaps(InvestmentProducts) || words.Overlaps(InvestmentMovements)))
             return InvestmentHint;
+        if (IsBrokerSettlement(transaction))
+            return InvestmentHint;
         return null;
+    }
+
+    /// <summary>
+    /// A settlement between a checking account and the bank's own brokerage ("Saída COR ITAUCOR LIQUIDACAO",
+    /// "Entrada COR OPERACOES B3"): money moving to or from the holder's investments at the same institution, which
+    /// the aggregator often categorises as a card payment or a dividend. Only the brokerage's own shapes count: "Saída
+    /// COR …" / "Entrada COR …" and ITAUCOR. Tax the brokerage withholds ("Saída COR IRRF ETF") is not a transfer and
+    /// gets no hint.
+    /// </summary>
+    private static bool IsBrokerSettlement(OpenFinanceTransaction transaction)
+    {
+        var sequence = OrderedWords($"{transaction.TypeDetail} {transaction.Description}");
+        if (sequence.Contains("IRRF"))
+            return false;
+
+        for (var i = 0; i < sequence.Count; i++)
+        {
+            if (sequence[i] == "ITAUCOR")
+                return true;
+            if (sequence[i] is "SAIDA" or "ENTRADA" && i + 1 < sequence.Count && sequence[i + 1] == "COR")
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>The investment product a sweep line names (<c>CDB</c>, <c>LCI</c>, <c>LCA</c>, <c>POUPANCA</c>), if any.</summary>
@@ -261,7 +288,10 @@ public static class OpenFinanceTransactionMapper
         account.HolderTaxId is { } holder && party?.TaxId is { } taxId && taxId.Value == holder.Value;
 
     /// <summary>Upper-case ASCII words: "Resgate automático CDB" becomes {RESGATE, AUTOMATICO, CDB}.</summary>
-    private static HashSet<string> Words(string value)
+    private static HashSet<string> Words(string value) => new(OrderedWords(value), StringComparer.Ordinal);
+
+    /// <summary>The words of a text in order: upper case, without accents, split on anything but ASCII letters and digits.</summary>
+    private static List<string> OrderedWords(string value)
     {
         var decomposed = value.Normalize(NormalizationForm.FormD);
         var builder = new StringBuilder(decomposed.Length);
@@ -272,7 +302,7 @@ public static class OpenFinanceTransactionMapper
             builder.Append(char.IsAsciiLetterOrDigit(c) ? char.ToUpperInvariant(c) : ' ');
         }
 
-        return new HashSet<string>(builder.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries), StringComparer.Ordinal);
+        return [.. builder.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries)];
     }
 
     private static void WriteOptional(Utf8JsonWriter writer, string name, string? value)
