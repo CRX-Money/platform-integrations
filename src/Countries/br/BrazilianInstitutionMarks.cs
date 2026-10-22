@@ -47,6 +47,34 @@ public static class BrazilianInstitutionMarks
         return true;
     }
 
+    /// <summary>The prefix of a connector's own mark: <c>{prefix}{connector id}.svg</c> (Pluggy's business connectors, #1379).</summary>
+    public const string ConnectorResourcePrefix = ResourcePrefix + "connectors.";
+
+    /// <summary>
+    /// Opens the mark of an aggregator's connector by its id (<see cref="BrazilianInstitutionConnectors"/>): the
+    /// business (PJ) variants carry their own icon (Inter Empresas). Returns <c>false</c> when the connector has none,
+    /// and the host shows the institution's mark instead.
+    /// </summary>
+    public static bool TryOpenConnector(string? connectorId, [NotNullWhen(true)] out Stream? content, [NotNullWhen(true)] out string? mediaType)
+    {
+        content = null;
+        mediaType = null;
+        if (string.IsNullOrWhiteSpace(connectorId) || !connectorId.Trim().All(char.IsAsciiDigit))
+            return false;
+        foreach (var extension in new[] { ".svg", ".png" })
+        {
+            var resource = ConnectorResourcePrefix + connectorId.Trim() + extension;
+            content = typeof(BrazilianInstitutionMarks).Assembly.GetManifestResourceStream(resource);
+            if (content is not null)
+            {
+                mediaType = MediaTypeOf(resource);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>The media type of a mark resource by its extension.</summary>
     internal static string MediaTypeOf(string resourceName) =>
         resourceName.EndsWith(".svg", StringComparison.Ordinal) ? "image/svg+xml" : "image/png";

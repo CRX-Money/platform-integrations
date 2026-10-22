@@ -30,35 +30,86 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
         var institution = item.Connector?.Name?.Trim();
         var summary = $"Pluggy item {item.Status}" + (string.IsNullOrEmpty(institution) ? string.Empty : $" via {institution}")
             + (item.LastUpdatedAt is { } updated ? $", last refreshed {updated.ToUniversalTime():yyyy-MM-dd HH:mm} UTC" : string.Empty) + ".";
+        var accounts = await AccountsForCheckAsync(credentials, itemId, cancellationToken).ConfigureAwait(false);
+        var compes = accounts
+            .Select(a => BrazilianBankAccount.TryParseTransferNumber(a.BankData?.TransferNumber)?.Compe)
+            .OfType<string>()
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
         return new OpenFinanceConnectionCheck(summary, item.ConsentExpiresAt, ItemDiagnostics(item))
         {
             LastRefreshedAt = item.LastUpdatedAt,
             IsSandbox = item.Connector?.IsSandbox,
-            AccountOperatorCompes = await AccountOperatorCompesAsync(credentials, itemId, cancellationToken).ConfigureAwait(false),
+            AccountOperatorCompes = compes,
+            Connector = ResolveConnector(item.Connector, compes.FirstOrDefault(), HolderOf(accounts)),
         };
     }
 
     /// <summary>
-    /// The COMPE codes of the item's deposit accounts: the account operator. With Meu Pluggy the connector is
-    /// Meu Pluggy itself, never the bank, so the accounts are the only place the bank shows. Best effort: a test
-    /// whose item read worked does not fail because the accounts could not be listed.
+    /// The item's accounts, for the COMPE codes of its deposit accounts (the account operator) and their holder. With
+    /// Meu Pluggy the connector is Meu Pluggy itself, never the bank, so the accounts are the only place the bank shows.
+    /// Best effort: a test whose item read worked does not fail because the accounts could not be listed.
     /// </summary>
-    private async Task<IReadOnlyList<string>> AccountOperatorCompesAsync(PluggyCredentials credentials, Guid itemId, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<PluggyAccount>> AccountsForCheckAsync(PluggyCredentials credentials, Guid itemId, CancellationToken cancellationToken)
     {
         try
         {
-            var accounts = await api.GetAccountsAsync(credentials, itemId, cancellationToken).ConfigureAwait(false);
-            return accounts
-                .Select(a => BrazilianBankAccount.TryParseTransferNumber(a.BankData?.TransferNumber)?.Compe)
-                .OfType<string>()
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
+            return await api.GetAccountsAsync(credentials, itemId, cancellationToken).ConfigureAwait(false);
         }
         catch (OpenFinanceSourceException)
         {
             return [];
         }
     }
+
+    /// <summary>An item belongs to one holder; its bank account carries the holder's CPF or CNPJ.</summary>
+    private static BrazilianTaxId? HolderOf(IEnumerable<PluggyAccount> accounts) =>
+        accounts
+            .Where(a => string.Equals(a.Type, "BANK", StringComparison.OrdinalIgnoreCase))
+            .Select(a => BrazilianTaxId.TryParse(a.TaxNumber))
+            .FirstOrDefault(t => t is not null);
+
+    /// <summary>
+    /// The connector the item reads through (#1379). An item connected directly names its bank's connector (Inter or
+    /// Inter Empresas, with its type and icon). An item through Meu Pluggy names the MeuPluggy connector, so the bank
+    /// of its accounts and their holder pick it from the country package: a company's accounts (CNPJ) read through the
+    /// bank's business connector. Null when neither tells.
+    /// </summary>
+    internal static IntegrationConnector? ResolveConnector(PluggyConnector? itemConnector, string? compe, BrazilianTaxId? holder)
+    {
+        var institution = BrazilianInstitutions.Find(compe);
+        if (itemConnector is { Id: { } id, Name: { } name } && !string.IsNullOrWhiteSpace(name) && !IsMeuPluggy(itemConnector))
+        {
+            var connectorId = id.ToString(CultureInfo.InvariantCulture);
+            var known = BrazilianInstitutionConnectors.Find(connectorId);
+            return new IntegrationConnector(name.Trim())
+            {
+                Id = connectorId,
+                IsBusiness = IsBusinessType(itemConnector.Type) || known?.IsBusiness == true,
+                IconUrl = Uri.TryCreate(itemConnector.ImageUrl, UriKind.Absolute, out var icon) && icon.Scheme == Uri.UriSchemeHttps ? icon : null,
+                InstitutionWebsite = known?.Institution.Website ?? institution?.Website,
+            };
+        }
+
+        if (institution is null || holder is not { } taxId)
+            return null;
+
+        var isBusiness = taxId.Kind == BrazilianTaxId.Cnpj;
+        if (BrazilianInstitutionConnectors.For(institution.Compe, isBusiness) is { } listed)
+            return new IntegrationConnector(listed.Name) { Id = listed.Id, IsBusiness = isBusiness, InstitutionWebsite = institution.Website };
+
+        // The bank has no listed business connector (or the list was not captured): still say the accounts are a company's.
+        return isBusiness ? new IntegrationConnector(institution.Name) { IsBusiness = true, InstitutionWebsite = institution.Website } : null;
+    }
+
+    /// <summary>Pluggy's own connector of the Meu Pluggy consent app (status page type <c>pluggy</c>), not a bank's.</summary>
+    private static bool IsMeuPluggy(PluggyConnector connector) =>
+        string.Equals(connector.Type, "pluggy", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(new string((connector.Name ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()), "MeuPluggy", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Pluggy's API types business connectors <c>BUSINESS_BANK</c>; its status page, <c>business</c>.</summary>
+    private static bool IsBusinessType(string? type) =>
+        type is not null && type.Contains("BUSINESS", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Days requested before the plugin's read date. Pluggy filters <c>dateFrom</c> on its own <c>date</c> field,
@@ -86,8 +137,7 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
         var issuerCompe = bankAccounts
             .Select(a => BrazilianBankAccount.TryParseTransferNumber(a.BankData?.TransferNumber)?.Compe)
             .FirstOrDefault(c => c is not null);
-        // An item belongs to one holder; its bank account carries the holder's CPF/CNPJ.
-        var holder = bankAccounts.Select(a => BrazilianTaxId.TryParse(a.TaxNumber)).FirstOrDefault(t => t is not null);
+        var holder = HolderOf(bankAccounts);
 
         DateOnly? dateFrom = readFrom?.AddDays(-DateFromMarginDays);
         // A card's balance includes its pending purchases, which can be as old as the open bill: read them all.
@@ -121,6 +171,7 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
         }))
         {
             Investments = investments.Positions,
+            Connector = ResolveConnector(item.Connector, issuerCompe, holder),
         };
     }
 

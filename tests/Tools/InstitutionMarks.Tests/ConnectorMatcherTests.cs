@@ -126,6 +126,34 @@ public sealed class ConnectorMatcherTests
     }
 
     [Fact]
+    public void A_banks_business_connector_is_paired_with_its_main_one()
+    {
+        // #1379: Inter (215) and Inter Empresas (225) are two connectors of one bank; Itaú Empresas the same for Itaú.
+        var inter = Institution("Inter", "https://inter.co/", "077", "00416968");
+        var itau = Institution("Itaú Unibanco", "https://www.itau.com.br/", "341", "60701190");
+        var citi = Institution("Citibank", "https://www.citibank.com.br/", "745", "33479023");
+        var connectors = new[]
+        {
+            new PluggyConnector(215, "Inter", null, "https://cdn.example/215.svg", "BR", "regulado", false),
+            new PluggyConnector(225, "Inter Empresas", null, "https://cdn.example/225.svg", "BR", "business", false),
+            new PluggyConnector(601, "Itaú", null, "https://cdn.example/201.svg", "BR", "regulado", false),
+            new PluggyConnector(618, "Itaú Empresas", null, "https://cdn.example/618.svg", "BR", "business", false),
+            new PluggyConnector(619, "Interbank", null, "https://cdn.example/619.svg", "BR", "business", false),
+            new PluggyConnector(477, "Citi Empresas", null, "https://cdn.example/477.svg", "BR", "business", false),
+        };
+        var aliases = new Dictionary<string, int> { ["341"] = 601 };
+        var matches = ConnectorMatcher.Match([inter, itau, citi], connectors, aliases);
+
+        var variants = ConnectorMatcher.MatchBusiness(matches, connectors);
+
+        Assert.Equal(
+            [("077", 215, 225), ("341", 601, 618)],
+            variants.Select(v => (v.Institution.Compe, v.Main.Id, v.Business.Id)));
+        // Citi's only connector is a business one: it is the institution's mark, with no separate variant;
+        // "Interbank" is another name, not Inter's business connector.
+    }
+
+    [Fact]
     public void A_personal_connector_wins_over_a_business_one_of_the_same_name()
     {
         var inter = Institution("Inter", "https://inter.co/");

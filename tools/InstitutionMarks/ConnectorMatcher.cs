@@ -22,6 +22,9 @@ internal enum MatchMethod
 
 internal sealed record MatchResult(BrazilianInstitution Institution, PluggyConnector? Connector, MatchMethod Method, IReadOnlyList<PluggyConnector> Others);
 
+/// <summary>An institution's business (PJ) connector next to its main one (Inter Empresas next to Inter, #1379).</summary>
+internal sealed record BusinessVariant(BrazilianInstitution Institution, PluggyConnector Main, PluggyConnector Business);
+
 /// <summary>Matches the institutions of the Brazilian package to Pluggy connectors by website host, alias and name.</summary>
 internal static class ConnectorMatcher
 {
@@ -128,6 +131,38 @@ internal static class ConnectorMatcher
 
         return new MatchResult(institution, null, MatchMethod.None, []);
     }
+
+    /// <summary>
+    /// The business (PJ) connector of each institution whose main connector was found: a connector typed business
+    /// (<c>business</c> on the status page, <c>BUSINESS_BANK</c> in the API) whose name starts, as whole words, with the
+    /// main connector's or the institution's name (<c>Inter Empresas</c>, <c>Itaú Empresas</c>); the shortest name, then
+    /// the lowest id. An institution whose main connector is already a business one has no variant.
+    /// </summary>
+    public static IReadOnlyList<BusinessVariant> MatchBusiness(IReadOnlyList<MatchResult> matches, IReadOnlyList<PluggyConnector> connectors)
+    {
+        var business = connectors.Where(c => IsBusiness(c.Type) && !c.IsSandbox).ToList();
+        var variants = new List<BusinessVariant>();
+        foreach (var match in matches)
+        {
+            if (match.Connector is not { } main || IsBusiness(main.Type))
+                continue;
+            var prefixes = new[] { NormalizeName(main.Name), InstitutionName(match.Institution.Name) }
+                .Where(p => p.Length > 0)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var variant = business
+                .Where(c => c.Id != main.Id && prefixes.Any(p => NormalizeName(c.Name).StartsWith(p + " ", StringComparison.Ordinal)))
+                .OrderBy(c => NormalizeName(c.Name).Length)
+                .ThenBy(c => c.Id)
+                .FirstOrDefault();
+            if (variant is not null)
+                variants.Add(new BusinessVariant(match.Institution, main, variant));
+        }
+
+        return variants;
+    }
+
+    public static bool IsBusiness(string? type) => type is not null && type.Contains("business", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The connector whose name is exactly the institution's, else a personal one over a business one, else the
