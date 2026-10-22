@@ -20,6 +20,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Marks (logos) of the account operators and the manifest of where each came from; see README. -->
+    <EmbeddedResource Include="Marks\*.svg;Marks\*.png;Marks\marks-manifest.json" LogicalName="CrxMoney.Integrations.Countries.Br.marks.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\Abstractions\CrxMoney.Integrations.Abstractions\CrxMoney.Integrations.Abstractions.csproj" />
   </ItemGroup>
 

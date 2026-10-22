@@ -2,6 +2,9 @@
   <Folder Name="/build/">
     <Project Path="build/FixtureGuard/CrxMoney.Integrations.FixtureGuard.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/InstitutionMarks/CrxMoney.Integrations.Tools.InstitutionMarks.csproj" />
+  </Folder>
   <Folder Name="/src/" />
   <Folder Name="/src/Abstractions/">
     <Project Path="src/Abstractions/CrxMoney.Integrations.Abstractions/CrxMoney.Integrations.Abstractions.csproj" />
@@ -33,6 +36,9 @@
   </Folder>
   <Folder Name="/tests/Providers/br/OpenFinance/">
     <Project Path="tests/Providers/br/OpenFinance/CrxMoney.Integrations.Providers.Br.OpenFinance.Tests/CrxMoney.Integrations.Providers.Br.OpenFinance.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Tools/">
+    <Project Path="tests/Tools/InstitutionMarks.Tests/CrxMoney.Integrations.Tools.InstitutionMarks.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Build/">
     <Project Path="tests/Build/CrxMoney.Integrations.FixtureGuard.Tests/CrxMoney.Integrations.FixtureGuard.Tests.csproj" />
