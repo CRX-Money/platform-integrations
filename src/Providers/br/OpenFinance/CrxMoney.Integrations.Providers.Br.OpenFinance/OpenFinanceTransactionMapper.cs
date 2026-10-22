@@ -135,27 +135,23 @@ public static class OpenFinanceTransactionMapper
 
     /// <summary>
     /// A settlement between a checking account and the bank's own brokerage ("Saída COR ITAUCOR LIQUIDACAO",
-    /// "Entrada COR OPERACOES B3", "Saída COR IRRF ETF"): money moving to or from the holder's investments at the
-    /// same institution, which the aggregator often categorises as a card payment or a dividend.
+    /// "Entrada COR OPERACOES B3"): money moving to or from the holder's investments at the same institution, which
+    /// the aggregator often categorises as a card payment or a dividend. Only the brokerage's own shapes count: "Saída
+    /// COR …" / "Entrada COR …" and ITAUCOR. Tax the brokerage withholds ("Saída COR IRRF ETF") is not a transfer and
+    /// gets no hint.
     /// </summary>
     private static bool IsBrokerSettlement(OpenFinanceTransaction transaction)
     {
         var sequence = OrderedWords($"{transaction.TypeDetail} {transaction.Description}");
+        if (sequence.Contains("IRRF"))
+            return false;
+
         for (var i = 0; i < sequence.Count; i++)
         {
-            var word = sequence[i];
-            if (word == "ITAUCOR")
+            if (sequence[i] == "ITAUCOR")
                 return true;
-            if (i + 1 < sequence.Count)
-            {
-                var next = sequence[i + 1];
-                if ((word is "SAIDA" or "ENTRADA" && next == "COR")
-                    || (word == "OPERACOES" && next == "B3")
-                    || (word == "IRRF" && next == "ETF"))
-                {
-                    return true;
-                }
-            }
+            if (sequence[i] is "SAIDA" or "ENTRADA" && i + 1 < sequence.Count && sequence[i + 1] == "COR")
+                return true;
         }
 
         return false;
