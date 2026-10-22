@@ -39,6 +39,10 @@ public interface IOpenFinanceSource
     /// (<see cref="OpenFinanceSnapshot.Investments"/>) come with every movement the source holds; the plugin
     /// applies the window to them as it does to account lines.
     /// </para>
+    /// <para>
+    /// A card may come with its bills (<see cref="OpenFinanceAccountTransactions.Bills"/>), every bill the source
+    /// lists, best effort: a source that cannot read them returns none rather than failing the read.
+    /// </para>
     /// </param>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <exception cref="OpenFinanceSourceException">An expected failure: bad credentials, consent problems, upstream errors.</exception>

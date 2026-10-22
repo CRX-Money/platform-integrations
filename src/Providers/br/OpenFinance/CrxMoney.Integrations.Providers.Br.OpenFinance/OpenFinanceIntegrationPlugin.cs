@@ -305,8 +305,8 @@ public abstract class OpenFinanceIntegrationPlugin
             if (snapshot.CredentialExpiresAt is { } expiresAt)
                 writer.WriteString("credentialExpiresAtUtc", expiresAt.ToUniversalTime());
             writer.WriteStartArray("accounts");
-            foreach (var (account, transactions) in snapshot.Accounts)
-                WriteAccountReport(writer, account, transactions, sentPerAccount.GetValueOrDefault(account.ExternalAccountId));
+            foreach (var accountTransactions in snapshot.Accounts)
+                WriteAccountReport(writer, accountTransactions, sentPerAccount.GetValueOrDefault(accountTransactions.Account.ExternalAccountId));
             foreach (var (investment, investmentMovements) in snapshot.Investments)
                 WriteInvestmentReport(writer, investment, investmentMovements.Count, sentPerAccount.GetValueOrDefault(investment.ExternalAccountId));
             writer.WriteEndArray();
@@ -342,8 +342,9 @@ public abstract class OpenFinanceIntegrationPlugin
     /// includes, except pending bill payments the card has received, which count as applied because the host books
     /// a bill payment from the paying account's debit (<c>pendingBillPayments</c> says how much).
     /// </summary>
-    private static void WriteAccountReport(Utf8JsonWriter writer, OpenFinanceAccount account, IReadOnlyList<OpenFinanceTransaction> transactions, int sent)
+    private static void WriteAccountReport(Utf8JsonWriter writer, OpenFinanceAccountTransactions accountTransactions, int sent)
     {
+        var (account, transactions) = accountTransactions;
         var isCard = account.Kind == OpenFinanceAccountKind.CreditCard;
         writer.WriteStartObject();
         writer.WriteString("kind", isCard ? "creditCard" : "deposit");
@@ -383,7 +384,34 @@ public abstract class OpenFinanceIntegrationPlugin
         }
 
         WriteOptionalString(writer, "institutionWebsite", account.InstitutionWebsite);
+        // New keys follow the preview.4 ones (#1386).
+        if (isCard && accountTransactions.Bills.Count > 0)
+            WriteBills(writer, accountTransactions.Bills, transactions);
         writer.WriteEndObject();
+    }
+
+    /// <summary>
+    /// A card's <c>bills</c> (#1386), oldest due date first: the issuer's numbers for each closed cycle, so the host can
+    /// set its ledger against the invoice the holder has in hand. <c>postedLinesRead</c> counts the posted lines of this
+    /// read that name the bill; a windowed read sees only part of them, so the host sums its own ledger instead.
+    /// </summary>
+    private static void WriteBills(Utf8JsonWriter writer, IReadOnlyList<OpenFinanceCardBill> bills, IReadOnlyList<OpenFinanceTransaction> transactions)
+    {
+        writer.WriteStartArray("bills");
+        foreach (var bill in bills.OrderBy(b => b.DueDate ?? DateOnly.MaxValue).ThenBy(b => b.Id, StringComparer.Ordinal))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("billId", bill.Id);
+            WriteOptionalDate(writer, "closeDate", bill.CloseDate);
+            WriteOptionalDate(writer, "dueDate", bill.DueDate);
+            WriteOptionalNumber(writer, "totalAmount", bill.TotalAmount);
+            WriteOptionalNumber(writer, "minimumPayment", bill.MinimumPayment);
+            WriteOptionalString(writer, "currencyCode", bill.CurrencyCode);
+            writer.WriteNumber("postedLinesRead", transactions.Count(t => !t.IsPending && string.Equals(t.CardBillId, bill.Id, StringComparison.Ordinal)));
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
     }
 
     /// <summary>One <c>accounts</c> row of kind <c>investment</c>: a position, its balance and what it says about itself.</summary>

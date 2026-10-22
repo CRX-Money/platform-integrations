@@ -102,7 +102,7 @@ public sealed class PluggyIntegrationPluginTests
         Assert.Equal(
             ["kind", "externalAccountId", "lines", "posted", "sent", "balance", "balanceAtUtc", "balanceSide",
              "pendingAmount", "pendingLines", "balanceWithPending", "creditLimit", "availableCreditLimit", "minimumPayment", "billCloseDate", "billDueDate",
-             "pendingBillPayments", "pendingBillPaymentLines", "institutionWebsite"],
+             "pendingBillPayments", "pendingBillPaymentLines", "institutionWebsite", "bills"],
             card.AsObject().Select(p => p.Key));
         // COMPE 077 is in the package's institution list; the card's issuer is the item's bank.
         Assert.Equal("https://inter.co/", bank["institutionWebsite"]!.GetValue<string>());
