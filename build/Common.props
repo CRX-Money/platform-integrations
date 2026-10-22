@@ -31,7 +31,7 @@
     <RepositoryUrl>https://github.com/CRX-Money/platform-integrations.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>crx-money;integrations;open-banking;finance</PackageTags>
-    <!-- No PackageIcon on purpose: brand assets are not redistributed through packages (see README). -->
+    <!-- No PackageIcon on purpose: CRX•Money brand assets are not redistributed through packages (see README). -->
   </PropertyGroup>
 
   <PropertyGroup Label="SourceLink and symbols">

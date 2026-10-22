@@ -16,6 +16,7 @@ dotnet add package CrxMoney.Integrations.Countries.Br --prerelease
 | `BrazilianBankAccount` | A deposit account as the banks identify it: COMPE + branch + account with check digit. `ExternalAccountId` is `br:{compe}:{branch}:{number}`; cards are `br:{compe}:card:{last4}`; investment positions are `br:{compe}:inv:{basis}:{key}`. |
 | `BrazilBankingCalendar` | São Paulo booking dates; imports are dated at midnight of the booking date (`2026-03-10T00:00-03:00`). |
 | `BrazilianInstitutions` | The account operators: COMPE code to display name and official website (below). |
+| `BrazilianInstitutionMarks` | The marks (logos) that identify those institutions in a connect list: `TryOpen(key, out stream, out mediaType)`; `BrazilianInstitution.MarkResourceName` names the embedded resource (below). |
 
 Pix key types and ISPB formatting will be added here when a provider needs them.
 
@@ -133,3 +134,57 @@ Notes:
 - To add an entry, take the code, ISPB and legal name from the Banco Central file,
   open the institution's own site, and keep the list sorted by code. A test checks
   every entry's format.
+
+## Institution marks
+
+`Marks/` holds the mark (logo) of each listed institution, embedded in the
+package next to `marks-manifest.json`. A connect list draws the mark so a person
+sees which bank is which; an institution without one is drawn as a monogram from
+its name and colours.
+
+```csharp
+var institution = BrazilianInstitutions.Find("077");
+if (BrazilianInstitutionMarks.TryOpen(institution!.Ispb, out var stream, out var mediaType))
+{
+    using (stream) { /* image/svg+xml or image/png */ }
+}
+```
+
+- The key is the institution's ISPB (`00416968`); a COMPE code is accepted too.
+  `BrazilianInstitution.MarkResourceName` is the resource name, or `null` for a
+  monogram. The files are `{ispb}.svg` (preferred) or `{ispb}.png`, kept as
+  downloaded, at most 256 KB each.
+- SVG files must carry no script, event handler, `foreignObject` or external
+  reference. A host should still serve them as images (never inline) with a
+  sandboxing `Content-Security-Policy`.
+
+### Where the marks come from
+
+Each file is the image of the matching Brazilian connector in
+[Pluggy](https://pluggy.ai)'s public connector list (`GET /connectors`, the
+`imageUrl` field), the aggregator the Open Finance plugin uses. The matching
+connector is found by website host first and by name second.
+`Marks/marks-manifest.json` records, per file: the institution (ISPB and COMPE),
+the connector id and name, how it matched, the source URL, the media type, the
+size, the SHA-256 and the UTC capture time. Its `monogram` list names every
+institution without a mark and why. A test checks that the manifest, the
+embedded files and the institution list agree, so an institution is never in
+both lists, and never in neither.
+
+`tools/InstitutionMarks` refreshes all of it. It needs a Pluggy client id and
+secret in the environment (never written anywhere) and prints a match report:
+
+```
+CRX_PLUGGY_CLIENT_ID=... CRX_PLUGGY_CLIENT_SECRET=... dotnet run --project tools/InstitutionMarks
+dotnet run --project tools/InstitutionMarks -- --dry-run   # report only, writes nothing
+```
+
+### Trademarks and removal
+
+The marks are trademarks of their owners and are **not** covered by this
+repository's Apache-2.0 licence. They are included only to identify the
+institution a person is choosing, which is how every aggregator's connect list
+uses them; nothing here suggests that an institution endorses CRX•Money or this
+package. If an institution would like its mark removed, open an issue or write to
+`admin@crx.money`: the file is removed (the institution goes back to the monogram
+list) in the next release.

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>CrxMoney.Integrations.Tools.InstitutionMarks</RootNamespace>
+    <AssemblyName>CrxMoney.Integrations.Tools.InstitutionMarks</AssemblyName>
+    <!-- A maintainer tool, never shipped. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Countries\br\CrxMoney.Integrations.Countries.Br.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CrxMoney.Integrations.Tools.InstitutionMarks.Tests" />
+  </ItemGroup>
+
+</Project>

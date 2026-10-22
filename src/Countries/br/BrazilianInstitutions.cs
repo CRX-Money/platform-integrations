@@ -10,7 +10,14 @@ namespace CrxMoney.Integrations.Countries.Br;
 /// <param name="Name">Display name (<c>Inter</c>).</param>
 /// <param name="LegalName">Legal name as the Banco Central lists it.</param>
 /// <param name="Website">The institution's official website, a canonical <c>https://host/</c> URL.</param>
-public sealed record BrazilianInstitution(string Compe, string Ispb, string Name, string LegalName, Uri Website);
+public sealed record BrazilianInstitution(string Compe, string Ispb, string Name, string LegalName, Uri Website)
+{
+    /// <summary>
+    /// The embedded resource holding this institution's mark (logo), or <c>null</c> when it has none and is drawn as a
+    /// monogram. Open it with <see cref="BrazilianInstitutionMarks.TryOpen"/>.
+    /// </summary>
+    public string? MarkResourceName => BrazilianInstitutionMarks.ResourceNameOf(Ispb);
+}
 
 /// <summary>
 /// The institutions of <c>Data/br-institutions.json</c>, shipped inside this package: a COMPE code's

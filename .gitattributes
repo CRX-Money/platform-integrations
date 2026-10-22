@@ -9,3 +9,7 @@
 *.ofx -text
 *.qfx -text
 *.pdf binary
+
+# Marks are compared by hash; never rewrite their bytes.
+src/Countries/br/Marks/*.svg -text
+src/Countries/br/Marks/*.png binary

@@ -109,7 +109,13 @@ The code in this repository is licensed under the [Apache License 2.0](LICENSE).
 licence says, the licence grants no rights to them. Write the name as
 **CRX•Money** (with the bullet) when referring to the platform, and do not use it
 or the logo to suggest that a fork or derived work is endorsed by CRX•Money. This
-repository contains no logo files and its packages carry no icon; approved brand
+repository contains no CRX•Money logo files and its packages carry no icon; approved brand
 assets are published only through the asset section (§18) of the
 [brand guidelines](https://crx.money/brand), and should be taken from there,
 never copied from this repository, a screenshot or a slide.
+
+The one exception is third-party: the Brazil country package embeds the marks
+(logos) of the financial institutions it lists, so a connect list can show which
+bank is which. They belong to their owners, are not covered by the Apache
+licence, and are used only to identify the institution; the package README says
+where each came from and how to ask for one to be removed.

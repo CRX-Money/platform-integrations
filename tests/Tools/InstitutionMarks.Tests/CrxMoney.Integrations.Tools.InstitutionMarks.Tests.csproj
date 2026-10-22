@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\tools\InstitutionMarks\CrxMoney.Integrations.Tools.InstitutionMarks.csproj" />
+  </ItemGroup>
+
+</Project>
