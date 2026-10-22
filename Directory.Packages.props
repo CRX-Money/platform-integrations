@@ -18,6 +18,13 @@
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
   </ItemGroup>
 
+  <ItemGroup Label="Tools">
+    <!-- tools/InstitutionMarks renders the institution marks to find their content bounds and to draw the contact sheet. -->
+    <PackageVersion Include="Svg.Skia" Version="5.2.3" />
+    <!-- The renderer's native library for Linux (CI); Windows and macOS get theirs with SkiaSharp. Same version as the SkiaSharp that Svg.Skia brings. -->
+    <PackageVersion Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.148.0" />
+  </ItemGroup>
+
   <ItemGroup Label="Tests">
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.11.0" />
     <PackageVersion Include="PublicApiGenerator" Version="11.5.4" />

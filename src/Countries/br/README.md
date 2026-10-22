@@ -152,8 +152,8 @@ if (BrazilianInstitutionMarks.TryOpen(institution!.Ispb, out var stream, out var
 
 - The key is the institution's ISPB (`00416968`); a COMPE code is accepted too.
   `BrazilianInstitution.MarkResourceName` is the resource name, or `null` for a
-  monogram. The files are `{ispb}.svg` (preferred) or `{ispb}.png`, kept as
-  downloaded, at most 256 KB each.
+  monogram. The files are `{ispb}.svg` (preferred) or `{ispb}.png`, as downloaded
+  and then normalised (below), at most 256 KB each.
 - SVG files must carry no script, event handler, `foreignObject` or external
   reference. A host should still serve them as images (never inline) with a
   sandboxing `Content-Security-Policy`.
@@ -166,7 +166,8 @@ key is needed: the connector list (id, name, type, icon address) is the public s
 <https://status.pluggy.ai/>, which is also where each mapping is recorded as coming from.
 `Marks/marks-manifest.json` records, per file: the institution (ISPB and COMPE), the connector id and name,
 how it matched (`matchedBy`), the page the mapping came from (`mappedFrom`), the file's source URL, the media
-type, the size, the SHA-256 and the UTC capture time. Its `monogram` list names every institution without a
+type, the size and SHA-256 of the file as shipped, how it was normalised (`normalised`, below) and the UTC capture
+time. Its `monogram` list names every institution without a
 mark and why. A test checks that the manifest, the embedded files and the institution list agree, so an
 institution is never in both lists, and never in neither.
 
@@ -189,6 +190,39 @@ dotnet user-secrets set CRX_PLUGGY_CLIENT_ID "..." --project tools/InstitutionMa
 A downloaded image is kept only when it is SVG or PNG, at most 256 KB, and (for SVG) free of script,
 event handlers, `foreignObject` and external references; otherwise the institution stays a monogram and the
 report says why.
+
+### Normalisation of the canvas
+
+The icons come with whatever canvas their makers drew: some sit in a white or coloured square with wide
+margins, so on a card they look smaller than the others and show a white box. After the download the tool
+cleans the **canvas only**; it never changes a shape, a path, a fill, a gradient or a text:
+
+1. **Background.** A full-canvas background (the bottom layer, a `<rect>` or `<path>` that paints at least 90% of
+   the canvas in one flat colour, white or semi-transparent white included) is dropped when the mark still
+   reads on a white card **and** on a dark one without it (at least 70% of what is drawn has a contrast of 1.6
+   or more against each). A coloured tile that **is** the mark (Inter's orange square, Nubank's purple, a white
+   glyph on a brand colour) stays: without it the glyph reads on neither. A gradient tile is never dropped
+   silently.
+2. **viewBox.** The `viewBox` is tightened to the bounds of what is drawn plus a 2% margin (of the longer side),
+   keeping the mark's own aspect ratio and never reaching outside the old viewBox, so nothing that was clipped
+   becomes visible. The bounds come from drawing the SVG (Svg.Skia, SkiaSharp) and taking the non-transparent
+   pixels, mapped back to viewBox units; the file's `width` and `height` follow the new viewBox. A host that
+   draws a mark contained in a square box then sees every mark fill it on its longer side.
+3. **Manual review.** What the tool cannot decide safely is left exactly as downloaded and listed in
+   `tools/InstitutionMarks/review/br-marks-normalisation.md`: several candidate backgrounds, a tile that is not
+   one flat colour but whose mark reads without it, a white tile the mark cannot do without (it reads on white
+   only), text (its bounds depend on the machine's fonts), or a result that does not draw what the source drew.
+
+The manifest records, per mark, `normalised`: `viewBoxBefore`, `viewBoxAfter`, `backgroundRemoved`, `method`
+(`viewbox-tightened`, `background-removed+viewbox-tightened`, `unchanged` when the file is already tight or its
+tile is the mark, `manual-review`, `not-applicable` for a PNG), the size and SHA-256 of the file as downloaded
+(`originalBytes`, `originalSha256`), the colour of a dropped tile (`backgroundFill`) and a `note`. A test checks
+the record against the shipped files. `tools/InstitutionMarks/review/` also holds
+`br-marks-contact-sheet.png`, every mark before and after in 44 px boxes on a light and a dark card, so the
+optical size can be judged in one look; the tool rewrites both files on every run (`--review <dir>` moves them,
+`--no-normalise` ships the files as downloaded). Marks the contact sheet shows reading on one card only (a
+dark mark on the dark card) are listed in the report; the marks are the institutions' and are not recoloured.
+
 ### Trademarks and removal
 
 The marks are trademarks of their owners and are **not** covered by this
