@@ -7,7 +7,8 @@ using CrxMoney.Integrations.Tools.InstitutionMarks;
 
 // Refreshes src/Countries/br/Marks from Pluggy's connector list. Usage:
 //   dotnet run --project tools/InstitutionMarks -- [--out <marks dir>] [--dry-run]
-// Needs CRX_PLUGGY_CLIENT_ID and CRX_PLUGGY_CLIENT_SECRET in the environment; they are never printed or written.
+// Needs CRX_PLUGGY_CLIENT_ID and CRX_PLUGGY_CLIENT_SECRET in the environment or in this project's user secrets;
+// they are never printed or written.
 
 var outDirectory = (string?)null;
 var dryRun = false;
@@ -27,11 +28,11 @@ for (var i = 0; i < args.Length; i++)
     }
 }
 
-var clientId = Environment.GetEnvironmentVariable("CRX_PLUGGY_CLIENT_ID");
-var clientSecret = Environment.GetEnvironmentVariable("CRX_PLUGGY_CLIENT_SECRET");
+var clientId = Credentials.Read(Credentials.ClientIdName);
+var clientSecret = Credentials.Read(Credentials.ClientSecretName);
 if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
 {
-    Console.Error.WriteLine("Set CRX_PLUGGY_CLIENT_ID and CRX_PLUGGY_CLIENT_SECRET in the environment first.");
+    Console.Error.WriteLine("Set CRX_PLUGGY_CLIENT_ID and CRX_PLUGGY_CLIENT_SECRET in the environment, or with dotnet user-secrets set <name> <value> --project tools/InstitutionMarks.");
     return 2;
 }
 

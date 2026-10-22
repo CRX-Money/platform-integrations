@@ -6,6 +6,8 @@
     <AssemblyName>CrxMoney.Integrations.Tools.InstitutionMarks</AssemblyName>
     <!-- A maintainer tool, never shipped. -->
     <IsPackable>false</IsPackable>
+    <!-- The id of the dotnet user-secrets store that keeps the Pluggy credentials out of the repository (see the package README). -->
+    <UserSecretsId>crx-money-institution-marks</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

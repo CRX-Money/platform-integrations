@@ -172,11 +172,12 @@ embedded files and the institution list agree, so an institution is never in
 both lists, and never in neither.
 
 `tools/InstitutionMarks` refreshes all of it. It needs a Pluggy client id and
-secret in the environment (never written anywhere) and prints a match report:
+secret, from the environment or `dotnet user-secrets` (never written anywhere), and prints a match report:
 
 ```
 CRX_PLUGGY_CLIENT_ID=... CRX_PLUGGY_CLIENT_SECRET=... dotnet run --project tools/InstitutionMarks
 dotnet run --project tools/InstitutionMarks -- --dry-run   # report only, writes nothing
+dotnet user-secrets set CRX_PLUGGY_CLIENT_ID "..." --project tools/InstitutionMarks   # instead of the environment variables
 ```
 
 ### Trademarks and removal
