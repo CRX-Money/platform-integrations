@@ -176,7 +176,32 @@ public sealed record OpenFinanceSnapshot(
 }
 
 /// <summary>One account and its transactions from the requested read date on (see <see cref="IOpenFinanceSource.ReadAsync"/>).</summary>
-public sealed record OpenFinanceAccountTransactions(OpenFinanceAccount Account, IReadOnlyList<OpenFinanceTransaction> Transactions);
+public sealed record OpenFinanceAccountTransactions(OpenFinanceAccount Account, IReadOnlyList<OpenFinanceTransaction> Transactions)
+{
+    /// <summary>
+    /// A card's bills as the source lists them, whatever the read window; empty for a deposit account, and for a card
+    /// when the source lists none or could not read them. A card line names its bill in
+    /// <see cref="OpenFinanceTransaction.CardBillId"/>.
+    /// </summary>
+    public IReadOnlyList<OpenFinanceCardBill> Bills { get; init; } = [];
+}
+
+/// <summary>
+/// One bill (fatura) of a card as the issuer reports it: what the holder had to pay for one closed cycle.
+/// </summary>
+/// <param name="Id">The source's bill id, the one card lines carry.</param>
+/// <param name="DueDate">The due date, when reported.</param>
+/// <param name="TotalAmount">The bill's total (positive = owed by the holder), when reported.</param>
+/// <param name="MinimumPayment">The minimum payment, when reported.</param>
+/// <param name="CloseDate">The closing date of the cycle, when the source reports one.</param>
+/// <param name="CurrencyCode">The total's currency (ISO 4217), when reported.</param>
+public sealed record OpenFinanceCardBill(
+    string Id,
+    DateOnly? DueDate,
+    decimal? TotalAmount,
+    decimal? MinimumPayment = null,
+    DateOnly? CloseDate = null,
+    string? CurrencyCode = null);
 
 /// <summary>
 /// What a card owes as its issuer reports it. Open Finance issuers report the <b>used limit</b>, which includes

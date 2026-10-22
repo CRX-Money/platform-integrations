@@ -73,7 +73,14 @@ internal sealed class FakePluggyServer : HttpMessageHandler
     public static FakePluggyServer WithFixtures() => new FakePluggyServer()
         .On("/auth", (_, call) => Json($$"""{"apiKey":"synthetic-api-key-{{call}}"}"""))
         .On($"/items/{ItemId}", (_, _) => Json(Fixtures.Text("item.json")))
-        .On("/accounts", (_, _) => Json(Fixtures.Text("accounts.json")));
+        .On("/accounts", (_, _) => Json(Fixtures.Text("accounts.json")))
+        .On("/bills", (request, _) => Bills(request));
+
+    /// <summary><c>GET /bills?accountId=</c>: the card's bills of <c>bills.json</c>; any other account has none.</summary>
+    private static HttpResponseMessage Bills(RecordedRequest request) =>
+        request.Query("accountId") == CardAccountId
+            ? Json(Fixtures.Text("bills.json"))
+            : Json("""{"page":1,"total":0,"totalPages":1,"results":[]}""");
 
     /// <summary>
     /// <c>GET /v2/transactions</c> as documented: <c>dateFrom</c>/<c>dateTo</c> (<c>yyyy-mm-dd</c>, on the line's

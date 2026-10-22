@@ -96,6 +96,7 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
             : null;
         var result = new List<OpenFinanceAccountTransactions>();
         var pages = 0;
+        int billPages = 0, billsUnread = 0;
         foreach (var account in accounts)
         {
             var normalized = NormalizeAccount(account, issuerCompe);
@@ -105,7 +106,20 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
             var from = normalized.Kind == OpenFinanceAccountKind.CreditCard ? cardDateFrom : dateFrom;
             var read = await api.GetTransactionsAsync(credentials, account.Id!, from, cancellationToken).ConfigureAwait(false);
             pages += read.Pages;
-            result.Add(new OpenFinanceAccountTransactions(normalized, read.Lines.Select(l => NormalizeTransaction(normalized, l)).ToList()));
+            IReadOnlyList<OpenFinanceCardBill> bills = [];
+            if (normalized.Kind == OpenFinanceAccountKind.CreditCard)
+            {
+                var billRead = await ReadBillsAsync(credentials, account.Id!, cancellationToken).ConfigureAwait(false);
+                billPages += billRead.Pages;
+                if (billRead.Bills is null)
+                    billsUnread++;
+                bills = billRead.Bills ?? [];
+            }
+
+            result.Add(new OpenFinanceAccountTransactions(normalized, read.Lines.Select(l => NormalizeTransaction(normalized, l)).ToList())
+            {
+                Bills = bills
+            });
         }
 
         var investments = await ReadInvestmentsAsync(credentials, itemId, item, issuerCompe, cancellationToken).ConfigureAwait(false);
@@ -117,6 +131,11 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
             if (cardDateFrom is { } cardFrom && result.Any(a => a.Account.Kind == OpenFinanceAccountKind.CreditCard))
                 writer.WriteString("cardTransactionsDateFrom", cardFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             writer.WriteNumber("transactionPages", pages);
+            if (result.Any(a => a.Account.Kind == OpenFinanceAccountKind.CreditCard))
+            {
+                writer.WriteNumber("billPages", billPages);
+                writer.WriteNumber("cardsWithoutBills", billsUnread);
+            }
             investments.WriteDiagnostics(writer);
         }))
         {
@@ -134,6 +153,65 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
     internal const string SourceIdBasis = "pluggy";
 
     private static DateOnly Min(DateOnly a, DateOnly b) => a < b ? a : b;
+
+    /// <summary>
+    /// A card's bills from <c>GET /bills?accountId=</c> (#1386). Best effort: a bills read that fails (the product
+    /// missing from the item, an upstream error) leaves the card without bills (<c>null</c>) instead of failing the
+    /// sync; a bill without an id is skipped.
+    /// </summary>
+    private async Task<(IReadOnlyList<OpenFinanceCardBill>? Bills, int Pages)> ReadBillsAsync(PluggyCredentials credentials, string accountId, CancellationToken cancellationToken)
+    {
+        PluggyNumberedRead read;
+        try
+        {
+            read = await api.GetBillsAsync(credentials, accountId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OpenFinanceSourceException)
+        {
+            return (null, 0);
+        }
+
+        return (read.Results.Select(NormalizeBill).OfType<OpenFinanceCardBill>().ToList(), read.Pages);
+    }
+
+    /// <summary>
+    /// One Pluggy bill. Due and closing dates are calendar dates Pluggy sends as midnight UTC instants, so the date part
+    /// is the date. Pluggy documents no closing date; one is read when a bill carries it.
+    /// </summary>
+    internal static OpenFinanceCardBill? NormalizeBill(JsonElement bill)
+    {
+        if (bill.ValueKind != JsonValueKind.Object || FirstNonEmpty(BillString(bill, "id")) is not { } id)
+            return null;
+
+        return new OpenFinanceCardBill(
+            id,
+            BillDate(bill, "dueDate"),
+            BillDecimal(bill, "totalAmount") is { } total ? Math.Abs(total) : null,
+            BillDecimal(bill, "minimumPaymentAmount") is { } minimum ? Math.Abs(minimum) : null,
+            BillDate(bill, "closeDate") ?? BillDate(bill, "closingDate") ?? BillDate(bill, "billCloseDate"),
+            FirstNonEmpty(BillString(bill, "totalAmountCurrencyCode"))?.ToUpperInvariant());
+    }
+
+    private static string? BillString(JsonElement bill, string name) =>
+        bill.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static decimal? BillDecimal(JsonElement bill, string name)
+    {
+        if (!bill.TryGetProperty(name, out var value))
+            return null;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var number))
+            return number;
+        return value.ValueKind == JsonValueKind.String
+               && decimal.TryParse(value.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static DateOnly? BillDate(JsonElement bill, string name) =>
+        BillString(bill, name) is { Length: >= 10 } text
+        && DateOnly.TryParseExact(text[..10], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+            ? date
+            : null;
 
     /// <summary>The positions of the item and what reading them took, for the diagnostics.</summary>
     private sealed record InvestmentsRead(IReadOnlyList<OpenFinanceInvestmentMovements> Positions, string? SkippedReason, int Pages, int MovementPages, int MovementsSkipped)
