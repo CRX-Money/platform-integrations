@@ -135,8 +135,10 @@ internal static class ConnectorMatcher
     /// <summary>
     /// The business (PJ) connector of each institution whose main connector was found: a connector typed business
     /// (<c>business</c> on the status page, <c>BUSINESS_BANK</c> in the API) whose name starts, as whole words, with the
-    /// main connector's or the institution's name (<c>Inter Empresas</c>, <c>Itaú Empresas</c>); the shortest name, then
-    /// the lowest id. An institution whose main connector is already a business one has no variant.
+    /// main connector's or the institution's name (<c>Inter Empresas</c>, <c>Itaú Empresas</c>); one whose name says it
+    /// serves companies (Empresas, Negócios, PJ, Business) over another business product (<c>Itaú BBA</c>,
+    /// <c>Bradesco API</c>), then the shortest name, then the lowest id. An institution whose main connector is already a
+    /// business one has no variant.
     /// </summary>
     public static IReadOnlyList<BusinessVariant> MatchBusiness(IReadOnlyList<MatchResult> matches, IReadOnlyList<PluggyConnector> connectors)
     {
@@ -152,7 +154,8 @@ internal static class ConnectorMatcher
                 .ToList();
             var variant = business
                 .Where(c => c.Id != main.Id && prefixes.Any(p => NormalizeName(c.Name).StartsWith(p + " ", StringComparison.Ordinal)))
-                .OrderBy(c => NormalizeName(c.Name).Length)
+                .OrderByDescending(c => NormalizeName(c.Name).Split(' ').Any(word => CompanyWords.Contains(word)))
+                .ThenBy(c => NormalizeName(c.Name).Length)
                 .ThenBy(c => c.Id)
                 .FirstOrDefault();
             if (variant is not null)
@@ -161,6 +164,9 @@ internal static class ConnectorMatcher
 
         return variants;
     }
+
+    /// <summary>Words that name a connector for companies' accounts, after <see cref="NormalizeName"/>.</summary>
+    private static readonly HashSet<string> CompanyWords = new(StringComparer.Ordinal) { "empresas", "empresa", "negocios", "pj", "business" };
 
     public static bool IsBusiness(string? type) => type is not null && type.Contains("business", StringComparison.OrdinalIgnoreCase);
 

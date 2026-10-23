@@ -117,7 +117,7 @@ foreach (var (variant, image, failure) in businessMarks)
 
 var totalBytes = marks.Sum(m => (long)m.Image.Content.Length) + businessMarks.Sum(b => (long)(b.Image?.Content.Length ?? 0));
 Console.WriteLine();
-Console.WriteLine($"Assets: {marks.Count} files, {totalBytes} bytes.");
+Console.WriteLine($"Assets: {marks.Count + businessMarks.Count(b => b.Image is not null)} files, {totalBytes} bytes.");
 
 if (dryRun)
 {

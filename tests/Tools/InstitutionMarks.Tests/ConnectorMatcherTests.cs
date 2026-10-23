@@ -138,6 +138,9 @@ public sealed class ConnectorMatcherTests
             new PluggyConnector(225, "Inter Empresas", null, "https://cdn.example/225.svg", "BR", "business", false),
             new PluggyConnector(601, "Itaú", null, "https://cdn.example/201.svg", "BR", "regulado", false),
             new PluggyConnector(618, "Itaú Empresas", null, "https://cdn.example/618.svg", "BR", "business", false),
+            // Shorter names of other business products of the bank lose to the one that says Empresas.
+            new PluggyConnector(794, "Itaú BBA", null, "https://cdn.example/794.svg", "BR", "business", false),
+            new PluggyConnector(795, "Itaú Emps", null, "https://cdn.example/795.svg", "BR", "business", false),
             new PluggyConnector(619, "Interbank", null, "https://cdn.example/619.svg", "BR", "business", false),
             new PluggyConnector(477, "Citi Empresas", null, "https://cdn.example/477.svg", "BR", "business", false),
         };
