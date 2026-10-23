@@ -26,7 +26,9 @@ internal sealed record PluggyConnector(
     [property: JsonPropertyName("id")] long? Id,
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("isOpenFinance")] bool? IsOpenFinance,
-    [property: JsonPropertyName("isSandbox")] bool? IsSandbox);
+    [property: JsonPropertyName("isSandbox")] bool? IsSandbox,
+    [property: JsonPropertyName("type")] string? Type = null,
+    [property: JsonPropertyName("imageUrl")] string? ImageUrl = null);
 
 internal sealed record PluggyItemError(
     [property: JsonPropertyName("code")] string? Code,

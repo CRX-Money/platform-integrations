@@ -22,6 +22,8 @@
   <ItemGroup>
     <!-- Marks (logos) of the account operators and the manifest of where each came from; see README. -->
     <EmbeddedResource Include="Marks\*.svg;Marks\*.png;Marks\marks-manifest.json" LogicalName="CrxMoney.Integrations.Countries.Br.marks.%(Filename)%(Extension)" />
+    <!-- Marks of business (PJ) connectors, by the aggregator's connector id (#1379). -->
+    <EmbeddedResource Include="Marks\connectors\*.svg;Marks\connectors\*.png" LogicalName="CrxMoney.Integrations.Countries.Br.marks.connectors.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
