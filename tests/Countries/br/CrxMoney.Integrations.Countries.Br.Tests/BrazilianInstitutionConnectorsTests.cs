@@ -52,6 +52,28 @@ public sealed class BrazilianInstitutionConnectorsTests
         });
     }
 
+    [Fact]
+    public void Citis_only_connector_is_named_for_companies_and_serves_both_citi_institutions()
+    {
+        foreach (var compe in new[] { "477", "745" })
+        {
+            var citi = BrazilianInstitutionConnectors.For(compe, isBusiness: true);
+            Assert.NotNull(citi);
+            Assert.Equal(("710", "Citi Empresas", compe), (citi.Id, citi.Name, citi.Institution.Compe));
+            Assert.Null(BrazilianInstitutionConnectors.For(compe, isBusiness: false));
+        }
+    }
+
+    [Theory]
+    [InlineData("Inter Empresas", true)]
+    [InlineData("PicPay Negócios", true)]
+    [InlineData("Itaú PJ", true)]
+    [InlineData("Itaú BBA", false)]
+    [InlineData("Inter", false)]
+    [InlineData("Empresário", false)]
+    public void A_name_says_a_connector_serves_companies(string name, bool expected) =>
+        Assert.Equal(expected, BrazilianInstitutionConnectors.IsBusinessName(name));
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

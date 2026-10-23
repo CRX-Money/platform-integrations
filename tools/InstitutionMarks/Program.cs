@@ -125,6 +125,14 @@ if (dryRun)
     return 0;
 }
 
+// A mark whose bytes did not change keeps the capture time the manifest already records for it.
+var manifestPath = Path.Combine(outDirectory, "marks-manifest.json");
+var previousCapture = PreviousCaptureTimes(manifestPath);
+string CapturedAt(string key, byte[] content, string now) =>
+    previousCapture.TryGetValue(key, out var previous) && previous.Sha256 == Convert.ToHexStringLower(SHA256.HashData(content))
+        ? previous.CapturedAt
+        : now;
+
 Directory.CreateDirectory(outDirectory);
 foreach (var stale in Directory.EnumerateFiles(outDirectory).Where(f => Path.GetExtension(f) is ".svg" or ".png"))
     File.Delete(stale);
@@ -156,7 +164,7 @@ var manifest = new JsonObject
             ["matchedBy"] = m.Match.Method.ToString().ToLowerInvariant(),
             ["mappedFrom"] = mappedFrom,
             ["sourceUrl"] = m.Image.SourceUrl.AbsoluteUri,
-            ["capturedAt"] = timestamp,
+            ["capturedAt"] = CapturedAt($"mark:{m.Match.Institution.Ispb}", m.Image.Content, timestamp),
         };
     }).ToArray()),
     ["connectors"] = new JsonArray(businessMarks.Select(b =>
@@ -182,10 +190,11 @@ var manifest = new JsonObject
             entry["bytes"] = image.Content.Length;
             entry["sha256"] = Convert.ToHexStringLower(SHA256.HashData(image.Content));
             entry["sourceUrl"] = image.SourceUrl.AbsoluteUri;
+            entry["capturedAt"] = CapturedAt($"connector:{b.Variant.Business.Id}", image.Content, timestamp);
         }
         else
         {
-            entry["reason"] = $"no usable icon: {b.Failure}";
+            entry["reason"] = UnusableIconReason(b.Variant.Business, b.Failure);
         }
 
         return (JsonNode)entry;
@@ -200,9 +209,46 @@ var manifest = new JsonObject
 };
 
 var options = new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
-File.WriteAllText(Path.Combine(outDirectory, "marks-manifest.json"), manifest.ToJsonString(options) + "\n");
+File.WriteAllText(manifestPath, manifest.ToJsonString(options) + "\n");
 Console.WriteLine($"Wrote {outDirectory}");
 return 0;
+
+// "connector 781 lists the icon 620.svg, which is not usable: contains a foreignObject": the icon Pluggy lists for the
+// connector, by its own file name, since a business connector may list its main connector's icon.
+static string UnusableIconReason(PluggyConnector connector, string? failure)
+{
+    var icon = connector.ImageUrl is { } url && Uri.TryCreate(url, UriKind.Absolute, out var uri) ? Path.GetFileName(uri.AbsolutePath) : null;
+    var detail = failure is null ? "unknown" : failure.Contains(": ", StringComparison.Ordinal) && failure.StartsWith("http", StringComparison.Ordinal)
+        ? failure[(failure.IndexOf(": ", StringComparison.Ordinal) + 2)..]
+        : failure;
+    return icon is null
+        ? $"connector {connector.Id} lists no icon"
+        : $"connector {connector.Id} lists the icon {icon}, which is not usable: {detail}";
+}
+
+// The capture time and hash of each mark the manifest already records ("mark:{ispb}", "connector:{id}").
+static Dictionary<string, (string Sha256, string CapturedAt)> PreviousCaptureTimes(string manifestPath)
+{
+    var result = new Dictionary<string, (string, string)>(StringComparer.Ordinal);
+    if (!File.Exists(manifestPath))
+        return result;
+    var root = JsonNode.Parse(File.ReadAllText(manifestPath));
+    void Read(string section, string keyProperty, string prefix)
+    {
+        foreach (var entry in root?[section]?.AsArray() ?? [])
+        {
+            var key = entry?[keyProperty]?.ToJsonString().Trim('"');
+            var sha = entry?["sha256"]?.GetValue<string>();
+            var at = entry?["capturedAt"]?.GetValue<string>();
+            if (key is not null && sha is not null && at is not null)
+                result[$"{prefix}:{key}"] = (sha, at);
+        }
+    }
+
+    Read("marks", "ispb", "mark");
+    Read("connectors", "connectorId", "connector");
+    return result;
+}
 
 static string FindRepositoryRoot()
 {

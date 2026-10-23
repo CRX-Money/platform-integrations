@@ -7,7 +7,7 @@ namespace CrxMoney.Integrations.Countries.Br;
 /// <summary>An aggregator's connector to one institution of <see cref="BrazilianInstitutions"/>.</summary>
 /// <param name="Id">The aggregator's connector id (Pluggy <c>225</c>).</param>
 /// <param name="Name">The connector's name (<c>Inter Empresas</c>).</param>
-/// <param name="IsBusiness">The connector serves companies' accounts (PJ).</param>
+/// <param name="IsBusiness">The connector serves companies' accounts (PJ): a business variant, or a main connector named for companies (Citi Empresas).</param>
 /// <param name="Institution">The institution it belongs to.</param>
 public sealed record BrazilianInstitutionConnector(string Id, string Name, bool IsBusiness, BrazilianInstitution Institution);
 
@@ -27,7 +27,19 @@ public static class BrazilianInstitutionConnectors
 {
     private static readonly Lazy<Catalog> Data = new(Load);
 
-    /// <summary>Every connector the manifest lists, main ones first.</summary>
+    /// <summary>
+    /// True for a connector named for companies: a word Empresas, Empresa, Negócios, PJ or Business (accents and case
+    /// ignored). The tool pairs business variants by the same words.
+    /// </summary>
+    public static bool IsBusinessName(string? name) =>
+        (name ?? string.Empty).Normalize(System.Text.NormalizationForm.FormD)
+            .Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
+            .Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : ' ')
+            .Aggregate(new System.Text.StringBuilder(), (b, c) => b.Append(c), b => b.ToString())
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Any(word => word is "empresas" or "empresa" or "negocios" or "pj" or "business");
+
+    /// <summary>Every connector the manifest lists per institution, main ones first (one connector can serve two institutions: Citi).</summary>
     public static IReadOnlyList<BrazilianInstitutionConnector> All => Data.Value.All;
 
     /// <summary>The connector with this aggregator id, or <c>null</c>.</summary>
@@ -69,10 +81,11 @@ public static class BrazilianInstitutionConnectors
     {
         using var document = JsonDocument.Parse(BrazilianInstitutionMarks.ReadManifest());
         var all = new List<BrazilianInstitutionConnector>();
-        Read(document.RootElement, "marks", isBusiness: false, all);
+        // A main connector is a business one when its name says so (Citi's only connector is Citi Empresas).
+        Read(document.RootElement, "marks", isBusiness: null, all);
         Read(document.RootElement, "connectors", isBusiness: null, all);
         var byId = all.GroupBy(c => c.Id, StringComparer.Ordinal).ToFrozenDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
-        return new Catalog(all.DistinctBy(c => c.Id).ToList(), byId);
+        return new Catalog(all, byId);
     }
 
     private static void Read(JsonElement root, string section, bool? isBusiness, List<BrazilianInstitutionConnector> into)
@@ -87,7 +100,8 @@ public static class BrazilianInstitutionConnectors
                 : null;
             var name = entry.TryGetProperty("connectorName", out var nameValue) ? nameValue.GetString() : null;
             var compe = entry.TryGetProperty("compe", out var compeValue) ? compeValue.GetString() : null;
-            var business = isBusiness ?? (entry.TryGetProperty("kind", out var kind) && kind.GetString() == "business");
+            var business = isBusiness
+                ?? ((entry.TryGetProperty("kind", out var kind) && kind.GetString() == "business") || IsBusinessName(name));
             if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name) || BrazilianInstitutions.Find(compe) is not { } institution)
                 continue;
             into.Add(new BrazilianInstitutionConnector(id.Trim(), name.Trim(), business, institution));

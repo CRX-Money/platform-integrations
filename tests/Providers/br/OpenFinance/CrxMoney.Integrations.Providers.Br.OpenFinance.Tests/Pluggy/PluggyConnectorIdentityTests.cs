@@ -51,12 +51,8 @@ public sealed class PluggyConnectorIdentityTests
         var test = await host.Plugin.TestConnectionAsync("Pluggy", PluggyTestHost.Request(connectionId: 0), cancellationToken: Ct);
 
         var connector = test.Connector!;
-        Assert.True(connector.IsBusiness);
+        Assert.Equal(("225", "Inter Empresas", true), (connector.Id, connector.Name, connector.IsBusiness));
         Assert.Equal("https://inter.co/", connector.InstitutionWebsite!.AbsoluteUri);
-        // The package's business connector of Inter when the list holds one, else the bank's own name.
-        var listed = BrazilianInstitutionConnectors.For("077", isBusiness: true);
-        Assert.Equal((listed?.Id, listed?.Name ?? "Inter"), (connector.Id, connector.Name));
-        Assert.DoesNotContain("MeuPluggy", connector.Name, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -83,11 +79,53 @@ public sealed class PluggyConnectorIdentityTests
     [Fact]
     public void The_meu_pluggy_connector_is_never_taken_for_a_bank()
     {
-        var connector = PluggyOpenFinanceSource.ResolveConnector(
-            new PluggyConnector(200, "MeuPluggy", true, false, "PERSONAL_BANK"), compe: null, holder: null);
+        var connector = PluggyOpenFinanceSource.ResolveConnector(MeuPluggy, []);
 
         Assert.Null(connector);
     }
+
+    [Fact]
+    public void Accounts_at_two_banks_name_no_connector()
+    {
+        IReadOnlyCollection<PluggyAccount> accounts = [Bank("077", SyntheticTaxIds.Cnpj(4)), Bank("341", SyntheticTaxIds.Cnpj(4))];
+
+        Assert.Null(PluggyOpenFinanceSource.ResolveConnector(MeuPluggy, accounts));
+    }
+
+    [Fact]
+    public void Accounts_of_a_person_and_a_company_name_no_connector()
+    {
+        IReadOnlyCollection<PluggyAccount> accounts = [Bank("077", SyntheticTaxIds.Cpf(4)), Bank("077", SyntheticTaxIds.Cnpj(4))];
+
+        Assert.Null(PluggyOpenFinanceSource.ResolveConnector(MeuPluggy, accounts));
+    }
+
+    [Fact]
+    public void A_company_at_a_bank_with_no_business_connector_names_none()
+    {
+        var bank = BrazilianInstitutions.All.First(i =>
+            BrazilianInstitutionConnectors.For(i.Compe, isBusiness: true) is null
+            && BrazilianInstitutionConnectors.For(i.Compe, isBusiness: false) is not null);
+
+        Assert.Null(PluggyOpenFinanceSource.ResolveConnector(MeuPluggy, [Bank(bank.Compe, SyntheticTaxIds.Cnpj(4))]));
+        Assert.NotNull(PluggyOpenFinanceSource.ResolveConnector(MeuPluggy, [Bank(bank.Compe, SyntheticTaxIds.Cpf(4))]));
+    }
+
+    [Fact]
+    public void A_company_at_citi_reads_through_citis_only_connector_which_is_a_business_one()
+    {
+        var connector = PluggyOpenFinanceSource.ResolveConnector(MeuPluggy, [Bank("745", SyntheticTaxIds.Cnpj(4))]);
+
+        Assert.Equal(("710", "Citi Empresas", true), (connector!.Id, connector.Name, connector.IsBusiness));
+        // A person's Citi account has no personal connector to name.
+        Assert.Null(PluggyOpenFinanceSource.ResolveConnector(MeuPluggy, [Bank("745", SyntheticTaxIds.Cpf(4))]));
+    }
+
+    private static readonly PluggyConnector MeuPluggy = new(200, "MeuPluggy", true, false, "PERSONAL_BANK");
+
+    private static PluggyAccount Bank(string compe, string taxNumber) =>
+        new($"acc-{compe}-{taxNumber.Length}", "BANK", "CHECKING_ACCOUNT", "12345678-9", 10m, "BRL",
+            new PluggyBankData($"{compe}/0001/12345678-9"), taxNumber);
 
     private static string ItemWith(JsonObject connector)
     {

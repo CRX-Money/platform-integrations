@@ -118,8 +118,9 @@ public sealed record IntegrationConnectionWalkthroughStep(string Text)
 public sealed record IntegrationAccountOperator(string Name, Uri? Website);
 
 /// <summary>
-/// The connector the connection reads through, when the institution offers several (an aggregator's personal and
-/// business connectors for one bank: Inter and Inter Empresas). The host names and marks the connection after it.
+/// The aggregator's own entry for an institution (Pluggy calls it a connector) that the connection reads through, when
+/// the institution has several (personal and business entries for one bank: Inter and Inter Empresas). The host names
+/// and marks the connection after it.
 /// </summary>
 /// <param name="Name">The connector's display name (<c>Inter Empresas</c>).</param>
 public sealed record IntegrationConnector(string Name)

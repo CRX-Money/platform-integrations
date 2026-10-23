@@ -173,7 +173,10 @@ institution is never in both lists, and never in neither.
 
 Its `connectors` list names the business (PJ) connector next to an institution's main one (Inter Empresas, 225,
 next to Inter, 215): a connector typed business whose name starts with the main connector's or the institution's
-name. Each entry has the connector id and name, `kind: business`, the main connector's id, the institution, and
+name; one whose name says it serves companies (Empresas, Negócios, PJ, Business) wins over another business product
+of the bank (Itaú Empresas over Itaú BBA, Bradesco Empresas over Bradesco API), then the shortest name. A main
+connector named for companies (Citi's only connector, Citi Empresas) counts as a business one. A mark whose bytes did
+not change keeps the capture time the manifest already records. Each entry has the connector id and name, `kind: business`, the main connector's id, the institution, and
 either its own mark in `Marks/connectors/{connectorId}.svg` (with media type, size, SHA-256 and source URL) or the
 `reason` it has none. A plugin uses this list when the aggregator does not say which connector an item reads: through
 Meu Pluggy every item names the MeuPluggy connector, so the bank of its accounts and whether they belong to a company

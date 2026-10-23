@@ -41,7 +41,7 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
             LastRefreshedAt = item.LastUpdatedAt,
             IsSandbox = item.Connector?.IsSandbox,
             AccountOperatorCompes = compes,
-            Connector = ResolveConnector(item.Connector, compes.FirstOrDefault(), HolderOf(accounts)),
+            Connector = ResolveConnector(item.Connector, BankAccounts(accounts)),
         };
     }
 
@@ -64,19 +64,32 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
 
     /// <summary>An item belongs to one holder; its bank account carries the holder's CPF or CNPJ.</summary>
     private static BrazilianTaxId? HolderOf(IEnumerable<PluggyAccount> accounts) =>
-        accounts
-            .Where(a => string.Equals(a.Type, "BANK", StringComparison.OrdinalIgnoreCase))
+        BankAccounts(accounts)
             .Select(a => BrazilianTaxId.TryParse(a.TaxNumber))
             .FirstOrDefault(t => t is not null);
+
+    /// <summary>The item's deposit accounts: the ones that name the bank (COMPE) and the holder (tax id).</summary>
+    private static IReadOnlyList<PluggyAccount> BankAccounts(IEnumerable<PluggyAccount> accounts) =>
+        accounts.Where(a => string.Equals(a.Type, "BANK", StringComparison.OrdinalIgnoreCase)).ToList();
 
     /// <summary>
     /// The connector the item reads through (#1379). An item connected directly names its bank's connector (Inter or
     /// Inter Empresas, with its type and icon). An item through Meu Pluggy names the MeuPluggy connector, so the bank
     /// of its accounts and their holder pick it from the country package: a company's accounts (CNPJ) read through the
-    /// bank's business connector. Null when neither tells.
+    /// bank's business connector. Only when every bank account agrees on the bank and on the kind of holder (all CPF or
+    /// all CNPJ), and the package lists a connector for it; otherwise null, and the host keeps the institution's main
+    /// connector: no guess.
     /// </summary>
-    internal static IntegrationConnector? ResolveConnector(PluggyConnector? itemConnector, string? compe, BrazilianTaxId? holder)
+    internal static IntegrationConnector? ResolveConnector(PluggyConnector? itemConnector, IReadOnlyCollection<PluggyAccount> bankAccounts)
     {
+        var compes = bankAccounts
+            .Select(a => BrazilianBankAccount.TryParseTransferNumber(a.BankData?.TransferNumber)?.Compe)
+            .ToList();
+        var holders = bankAccounts.Select(a => BrazilianTaxId.TryParse(a.TaxNumber)).ToList();
+        var compe = compes.Count > 0 && compes.All(c => c is not null) && compes.Distinct(StringComparer.Ordinal).Count() == 1 ? compes[0] : null;
+        var holderKind = holders.Count > 0 && holders.All(h => h is not null) && holders.Select(h => h!.Value.Kind).Distinct(StringComparer.Ordinal).Count() == 1
+            ? holders[0]!.Value.Kind
+            : null;
         var institution = BrazilianInstitutions.Find(compe);
         if (itemConnector is { Id: { } id, Name: { } name } && !string.IsNullOrWhiteSpace(name) && !IsMeuPluggy(itemConnector))
         {
@@ -91,15 +104,13 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
             };
         }
 
-        if (institution is null || holder is not { } taxId)
+        if (institution is null || holderKind is null)
             return null;
 
-        var isBusiness = taxId.Kind == BrazilianTaxId.Cnpj;
-        if (BrazilianInstitutionConnectors.For(institution.Compe, isBusiness) is { } listed)
-            return new IntegrationConnector(listed.Name) { Id = listed.Id, IsBusiness = isBusiness, InstitutionWebsite = institution.Website };
-
-        // The bank has no listed business connector (or the list was not captured): still say the accounts are a company's.
-        return isBusiness ? new IntegrationConnector(institution.Name) { IsBusiness = true, InstitutionWebsite = institution.Website } : null;
+        var isBusiness = holderKind == BrazilianTaxId.Cnpj;
+        return BrazilianInstitutionConnectors.For(institution.Compe, isBusiness) is { } listed
+            ? new IntegrationConnector(listed.Name) { Id = listed.Id, IsBusiness = listed.IsBusiness, InstitutionWebsite = institution.Website }
+            : null;
     }
 
     /// <summary>Pluggy's own connector of the Meu Pluggy consent app (status page type <c>pluggy</c>), not a bank's.</summary>
@@ -171,7 +182,7 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
         }))
         {
             Investments = investments.Positions,
-            Connector = ResolveConnector(item.Connector, issuerCompe, holder),
+            Connector = ResolveConnector(item.Connector, bankAccounts),
         };
     }
 
