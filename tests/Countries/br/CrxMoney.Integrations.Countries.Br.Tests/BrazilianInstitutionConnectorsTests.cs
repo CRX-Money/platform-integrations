@@ -37,7 +37,13 @@ public sealed class BrazilianInstitutionConnectorsTests
             {
                 Assert.True(BrazilianInstitutionMarks.TryOpenConnector(id, out var content, out var mediaType));
                 using (content)
+                {
                     Assert.Equal(entry["mediaType"]!.GetValue<string>(), mediaType);
+                    // The bytes as captured: line endings are never rewritten (.gitattributes).
+                    using var buffer = new MemoryStream();
+                    content.CopyTo(buffer);
+                    Assert.Equal(entry["sha256"]!.GetValue<string>(), Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(buffer.ToArray())));
+                }
             }
             else
             {
