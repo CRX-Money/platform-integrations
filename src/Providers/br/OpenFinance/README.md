@@ -32,6 +32,90 @@ has exactly one adapter, that adapter runs.
 
 ## Changes after 1.0.0-preview.8
 
+- **Breaking for installment keys: an installment line gets its own identity (#1424).**
+  Up to preview.8 every line's identity was account, instant, direction and amount,
+  so the installments of an equal-amount series (one purchase: the same
+  `transactionTime` and the same amount on every installment) shared one identity
+  and were told apart by an ordinal numbered among the lines of each read. A
+  windowed read numbered the installments it held from 0 and gave them keys the host
+  already held for other installments of the series, so the host dropped them as
+  duplicates; and installment 2 and later of an older purchase was windowed by its
+  purchase date, so a daily sync read it and did not send it. Installments that
+  arrived after the first full read were never imported.
+
+  **The rule.** A card line that is an installment, by the same test as
+  `card.installment` (the source's number and count, else the trailing `dd/dd` of
+  the description; never a `SINGLE` line, never a deposit-account line), has the
+  line identity
+
+  ```
+  {externalAccountId}|{transactionTime in UTC, yyyy-MM-ddTHH:mm:ssZ}|{C or D}|{amount, 0.00}|{number}/{count}
+  ```
+
+  with the number and count in decimal, without leading zeros (`|2/6`, `|10/12`).
+  The key is built from it as before: `brof:` + the first 32 hex digits of
+  SHA-256(identity + `|` + ordinal). Installment 02/06 of a purchase at
+  2025-03-14T15:09:26Z, a 41.37 debit on card `br:077:card:1234`, has the identity
+  `br:077:card:1234|2025-03-14T15:09:26Z|D|41.37|2/6` and ordinal 0. Every other line
+  keeps the preview.8 identity and key byte for byte (the golden test of the move
+  from the Pluggy package passes unchanged). The installments of one purchase never
+  share an identity, so each one is ordinal 0 in any read that holds it, whatever
+  else the read holds; ordinals above 0 are left to genuinely identical lines (the
+  same installment of two identical purchases in the same second). The bill dates
+  are left out of the identity on purpose: Open Finance sends its placeholder
+  `billPostDate` (`0001-01-01`) on some posted lines, and the real date arriving
+  later must not change the key. A line keeps its key while it reads as the same
+  installment: a source that stopped reporting the number and count on a line whose
+  description has no suffix (or started calling it `SINGLE`) would change it.
+
+  **Sending.** A line is sent when the date its event carries (`OccurredAtUtc`: for
+  an installment, the date of its bill by the dating rule below) is on or after the
+  first date the sync sends, seven days before the host's window start. Before, the
+  plugin went by `transactionDate`, which for installment 2 and later is the purchase
+  date. A line that is not an installment is dated at `transactionDate`, so nothing
+  changes for it. The checkpoint keeps its documented meaning, the latest
+  `transactionDate` of an account line read (an installment's bill date does not move
+  it), and pairs still go by `transactionDate`.
+
+  **Version impact.** This changes the idempotency-key recipe for installment
+  lines, which [`docs/versioning.md`](../../../../docs/versioning.md) counts as
+  breaking for a provider. Previews may break when the release notes list the
+  change; this is that listing. A stable version would need a new major version.
+
+  **Host migration.** Installment lines imported with preview.8 or earlier keep their
+  old key in the host. After the upgrade the plugin sends the same lines with new
+  keys, and a host whose only guard is the unique key (TenantUuid,
+  IntegrationConnectionId, IdempotencyKey) inserts them again: a full re-read
+  duplicates every installment line already imported, and each windowed read
+  duplicates the installment lines in its window (the seven days of overlap
+  included). Lines that are not installments are not affected. The host re-keys the
+  existing items by the aggregator's line id, which it stores as `ExternalId`
+  (Pluggy's transaction id, stable for a line): for each incoming event whose key the
+  connection does not hold, an item of the same connection and external account with
+  the same `ExternalId` gets the new key (and, if the host re-dates, the new date)
+  instead of a new item being inserted.
+
+  ```sql
+  -- for each incoming event @e of connection @c, in the transaction that would insert it
+  UPDATE import_item
+     SET IdempotencyKey = @e.IdempotencyKey
+   WHERE TenantUuid = @tenant
+     AND IntegrationConnectionId = @c
+     AND ExternalAccountId = @e.ExternalAccountId
+     AND ExternalId = @e.ExternalId
+     AND IdempotencyKey <> @e.IdempotencyKey;
+  -- then insert @e only when no item of @c holds @e.IdempotencyKey
+  ```
+
+  Keep the step on every sync from the upgrade on: items outside every window keep
+  their old key until a full read passes them through it, which is harmless. Until
+  the host has the step (or de-duplicates by `ExternalId` some other way), a full
+  re-read with this version inserts a duplicate of every installment line already
+  imported: do not run one before. The re-key works for lines read through the same
+  aggregator only, since another aggregator's `ExternalId` differs.
+  Code: `OpenFinanceTransactionMapper.LineIdentity`, and the plugin's send test,
+  which uses `OpenFinanceTransactionMapper.EventDate`.
+
 - **Installments on card lines (#1417).** A card line now says whether it is an
   installment (parcela) of a purchase or a fee, and an installment's event is dated
   at its bill. New keys inside `card`, after `last4`, `billId` and `issuerCompe`
@@ -81,18 +165,15 @@ has exactly one adapter, that adapter runs.
   An installment is therefore never dated before its purchase, whatever the source
   sends. A single purchase and every other line keep the date of `transactionTime`.
   `transactionTime` and `transactionDate` still say when the bank dated the line,
-  and the read window, the checkpoint and pairs still go by `transactionDate` (see
-  the known gap on installments of older purchases, #1424).
+  and the checkpoint and pairs still go by `transactionDate`; a line is sent by its
+  event's date (since #1424, above).
 
-  **Keys do not move, for the same lines.** The idempotency key is built from the
-  transaction instant, never from the event's date, so when a read holds the same
-  set of lines, an installment line imported before this version gets the same key
-  with a new date. That holds only for the same set: the installments of one
-  purchase share one line identity (same instant and amount) and are told apart by
-  their ordinal, so a read that holds more or fewer of them can number them
-  differently (#1424). Whether a re-sync re-dates installment lines already imported
-  is the host's decision: the plugin only reports the new date on the event, and a
-  host that drops events whose key it already holds keeps the old date.
+  **A new date does not move the key.** The idempotency key never depends on the
+  event's date or on the bill dates, so dating an installment from its bill does not
+  change its key (the installment's number and count are part of it since #1424,
+  above). Whether a re-sync re-dates installment lines already imported is the host's
+  decision: the plugin only reports the new date on the event, and a host that drops
+  events whose key it already holds keeps the old date.
   Code: `OpenFinanceTransactionMapper.Installment` and `.EventDate`, from
   `OpenFinanceTransaction.CardDetails` (`OpenFinanceCardLineDetails`), which an
   adapter fills from its aggregator's card fields, and `OpenFinanceLineLinks.Bill`,
@@ -197,8 +278,9 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   the aggregator's account id. Imports of the same account through another
   aggregator, Inter's own API or an OFX file land on the same account map.
 - **Idempotency** is built only from what the bank reports:
-  `brof:` + SHA-256(account, instant to the second, credit/debit, amount,
-  ordinal among identical lines). Counterparty data is left out on purpose:
+  `brof:` + SHA-256(account, instant to the second, credit/debit, amount, for a
+  card installment its number and count (since #1424, see the changes after
+  preview.8), ordinal among identical lines). Counterparty data is left out on purpose:
   aggregators enrich it later and unevenly. The aggregator's id
   becomes the import's `ExternalId` and is kept in provider data, but never in the
   key. Switching aggregators on an existing connection therefore imports nothing
@@ -262,9 +344,11 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   movement.
 - **Sync behaviour**: pending lines are never imported. The plugin asks the source
   for lines booked from seven days before the host's window start (the full history
-  when the host gives no start) and sends exactly those. A source must return every
-  line of each booking date it covers, so lines that differ only by ordinal are
-  numbered as in a full read and keep their keys. Investment movements follow the
+  when the host gives no start) and sends those whose event is dated from then on:
+  the booking date, or for a card installment the date of its bill (#1424), so a
+  later installment of an older purchase is sent when its bill arrives. A source must
+  return every line of each booking date it covers, so lines that differ only by
+  ordinal are numbered as in a full read and keep their keys. Investment movements follow the
   same rule: the source returns all of them and the plugin sends those booked from
   the same date. The checkpoint `transactions` holds the latest booking date of an
   account line read, and never moves back when a window reads nothing new.
@@ -384,7 +468,10 @@ accounts needs Pluggy's commercial plan or another aggregator.
   the next page is requested with the same account and `dateFrom`, always on the
   Pluggy host. **Cards** are read from at least 62 days before today
   (`cardTransactionsDateFrom` in the diagnostics), so every pending purchase of the
-  open bill is in the read; see "Card balances" below.
+  open bill is in the read; see "Card balances" below. An installment line's `date`
+  is usually its bill post date, so the window catches installment 2 and later of an
+  older purchase when its bill arrives (the tail of a long series is the exception:
+  see the known gaps).
 
   **Why `dateFrom` and not `createdAtFrom`.** `createdAtFrom` (when Pluggy stored
   the line) would also catch a line Pluggy detects late with an older date, but it
@@ -510,15 +597,16 @@ Normalisation into the Open Finance model:
 - Payer names are often empty; the CPF/CNPJ is the reliable counterparty identity.
 - Identity pre-fill (`/identity`) is not read. Bills (`/bills`) are read since
   preview.8 (#1386), best effort.
-- **Installments that arrive after the first full read are not imported by
-  incremental syncs** until the idempotency-key recipe changes (#1424). Each
-  installment of a purchase carries the purchase instant as `transactionDateTime`,
-  so the plugin windows it by the purchase date: installment 2 and later of an older
-  purchase are read (Pluggy's own `date` is the bill post date) but fall before the
-  window and are not sent. Sending them would not be safe yet either: the
-  installments of one purchase share one line identity (same instant and amount)
-  and differ only by their ordinal, which depends on which of them a read holds. A
-  full-history sync imports them.
+- **Installments of older purchases on incremental syncs.** Since #1424 an
+  installment line has an identity of its own (its number and count join it) and is
+  sent by its bill's date, so installment 2 and later of an older purchase is
+  imported by the daily sync when Pluggy reports it with its bill post date as
+  `date`, with the key any other read gives it. One shape is still not read
+  incrementally: the tail of a long series, whose `billPostDate` equals the purchase
+  date, keeps the purchase date as Pluggy's `date`, and `dateFrom` filters on
+  `date`, so a windowed read does not receive it. A full-history sync imports it,
+  and after the host migration (changes after preview.8) a full read imports nothing
+  twice. Reading cards by `createdAtFrom` as well would cover it.
 - No link between account lines and investment movements, and no card id on the
   checking side of a bill payment: both are paired by the shared plugin by amount
   and date. A sweep with candidates on two positions stays unpaired.
@@ -539,7 +627,8 @@ Normalisation into the Open Finance model:
 investments, pairs, institution websites) against a fake source, and, under `Pluggy/`, item states, consent expiry, account
 identification, cursor paging, API-key caching and renewal, sign normalisation,
 counterparties, transfer hints, pending lines, the card balance split, card installments and their dates
-(`transactions-card-installments.json`), investment
+(`transactions-card-installments.json`), installment identities across reads of any subset and their windowed
+sending (#1424), investment
 positions, movements and their page-number paging, sweep and bill-payment pairs,
 key stability and windowing, and failures, against an in-memory fake of the API
 (`/investments` and `/investments/{id}/transactions` as documented, with paging). The fixtures are **written from synthetic data** in the shape the

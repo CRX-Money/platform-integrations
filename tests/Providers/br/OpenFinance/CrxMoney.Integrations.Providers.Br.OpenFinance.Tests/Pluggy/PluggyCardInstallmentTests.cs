@@ -11,8 +11,9 @@ namespace CrxMoney.Integrations.Providers.Br.OpenFinance.Tests.Pluggy;
 
 /// <summary>
 /// Installments (parcelas) on card lines (#1417): Pluggy's <c>creditCardMetadata</c> installment fields become
-/// <c>card.installment</c> and the other <c>card</c> keys, each installment is dated from its bill, and the idempotency
-/// key does not move. Every line of <c>transactions-card-installments.json</c> is synthetic, in the shape Pluggy sends
+/// <c>card.installment</c> and the other <c>card</c> keys, and each installment is dated from its bill. Since #1424 an
+/// installment's line identity carries its number and count, so the installments of one purchase never share a key
+/// identity, and a windowed read sends an installment by its bill's date. Every line of <c>transactions-card-installments.json</c> is synthetic, in the shape Pluggy sends
 /// for k &gt;= 2: <c>date</c> is the bill post date at 03:00Z while <c>transactionDateTime</c> and <c>purchaseDate</c>
 /// are the purchase instant.
 /// </summary>
@@ -96,16 +97,19 @@ public sealed class PluggyCardInstallmentTests
     }
 
     [Fact]
-    public async Task The_installments_of_one_purchase_share_one_line_identity_and_differ_only_by_ordinal()
+    public async Task Each_installment_of_a_purchase_has_its_own_line_identity()
     {
         var events = await CardEventsAsync(InstallmentLines());
 
-        // 01/06 and 02/06: same purchase instant and amount, so one line identity; the ordinal follows Pluggy's ids.
-        const string identity = $"{CardAccountKey}|2025-03-14T15:09:26Z|D|41.37";
-        Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey(identity, 0), events["f01"].IdempotencyKey);
-        Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey(identity, 1), events["f10"].IdempotencyKey);
+        // 01/06 and 02/06: same purchase instant and amount; the number and count tell them apart, so each is ordinal 0.
+        const string purchase = $"{CardAccountKey}|2025-03-14T15:09:26Z|D|41.37";
+        Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{purchase}|1/6", 0), events["f01"].IdempotencyKey);
+        Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{purchase}|2/6", 0), events["f10"].IdempotencyKey);
         Assert.Equal("2025-03-17", Date(events["f10"]));
         Assert.Equal("billPostDate", Text(Card(events["f10"])["installment"]!["dateSource"]));
+
+        // A suffix read from the description gives the same identity as the source's number and count would.
+        Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2025-06-17T13:05:00Z|D|287.45|10/12", 0), events["f06"].IdempotencyKey);
     }
 
     [Fact]
@@ -209,44 +213,194 @@ public sealed class PluggyCardInstallmentTests
     {
         var dated = InstallmentLines();
         var undated = InstallmentLines();
-        foreach (var name in new[] { "billPostDate", "billForecastDate", "paymentType", "installmentNumber", "totalInstallments", "purchaseDate" })
+        foreach (var name in new[] { "billPostDate", "billForecastDate", "billId", "purchaseDate" })
             undated[0]!["creditCardMetadata"]!.AsObject().Remove(name);
-        undated[0]!["descriptionRaw"] = "LOJA EXEMPLO*DECOR";
 
         var withBill = (await CardEventsAsync(dated))["f01"];
         var withoutBill = (await CardEventsAsync(undated))["f01"];
 
         Assert.Equal("2025-03-15", Date(withBill));
         Assert.Equal("2025-03-14", Date(withoutBill));
-        Assert.Null(Card(withoutBill)["installment"]);
-        // Same line, same set of lines read, new date: the key is the one the transaction instant gives, as before #1417.
+        Assert.Equal("purchase", Text(Card(withoutBill)["installment"]!["dateSource"]));
+        // The bill dates move the event, never the key: it comes from the instant, amount, number and count.
         Assert.Equal(withoutBill.IdempotencyKey, withBill.IdempotencyKey);
-        Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2025-03-14T15:09:26Z|D|41.37", 0), withBill.IdempotencyKey);
+        Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2025-03-14T15:09:26Z|D|41.37|1/6", 0), withBill.IdempotencyKey);
     }
 
     /// <summary>
-    /// Pins today's behaviour, a known gap: story #1424. A k &gt;= 2 installment of an older purchase arrives with
-    /// Pluggy's <c>date</c> inside an incremental read, but the plugin windows lines by the purchase instant
-    /// (<c>transactionDateTime</c>), so it is read and not sent. Sending it would not be safe either: the series shares
-    /// one line identity, so its keys depend on which installments a read holds. Only a full read sends it.
+    /// The tail of an equal-amount series, in the shape of the owner's real data (#1424): installments 08/12, 09/12 and
+    /// 10/12 of one purchase share Pluggy's <c>date</c>, the purchase instant, the amount and a bill post date equal to
+    /// the purchase date. Synthetic merchant; the number decides the line's id and bill.
+    /// </summary>
+    private static JsonNode TailLine(int number, bool withMetadata = true)
+    {
+        var line = JsonNode.Parse($$"""
+            {
+              "id": "00000000-0000-4000-8000-000000000a{{number:D2}}",
+              "accountId": "00000000-0000-4000-8000-0000000000b2",
+              "date": "2025-06-17T03:00:00.000Z",
+              "description": "Loja Exemplo Info {{number:D2}}/12",
+              "descriptionRaw": "LOJA EXEMPLO INFO {{number:D2}}/12",
+              "amount": 287.45,
+              "currencyCode": "BRL",
+              "type": "DEBIT",
+              "status": "POSTED",
+              "operationType": null,
+              "operationTypeAdditionalInfo": null,
+              "merchant": null,
+              "creditCardMetadata": {
+                "cardNumber": "1234",
+                "billId": "00000000-0000-4000-8000-0000000000c{{number:D2}}",
+                "paymentType": "INSTALLMENT",
+                "billPostDate": "2025-06-17",
+                "transactionDateTime": "2025-06-17T13:05:00.000Z",
+                "purchaseDate": "2025-06-17T13:05:00.000Z",
+                "totalInstallments": 12,
+                "installmentNumber": {{number}}
+              }
+            }
+            """)!;
+        if (!withMetadata)
+        {
+            var metadata = line["creditCardMetadata"]!.AsObject();
+            metadata.Remove("paymentType");
+            metadata.Remove("installmentNumber");
+            metadata.Remove("totalInstallments");
+        }
+
+        return line;
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)] // the number and count read from the description
+    public async Task The_installments_of_an_equal_amount_series_keep_their_keys_in_any_subset_read(bool withMetadata)
+    {
+        int[] numbers = [8, 9, 10];
+        var full = CardEvents(await SyncAsync(new JsonArray([.. numbers.Select(n => TailLine(n, withMetadata))])));
+
+        Assert.Equal(3, full.Values.Select(e => e.IdempotencyKey).Distinct().Count());
+        foreach (var n in numbers)
+        {
+            Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2025-06-17T13:05:00Z|D|287.45|{n}/12", 0),
+                full[$"a{n:D2}"].IdempotencyKey);
+        }
+
+        // Every subset, in reverse order (each line alone, each pair, the three): the same key for the same line.
+        for (var mask = 1; mask < 1 << numbers.Length; mask++)
+        {
+            var subset = numbers.Where((_, i) => (mask & (1 << i)) != 0).Reverse().ToList();
+            var read = CardEvents(await SyncAsync(new JsonArray([.. subset.Select(n => TailLine(n, withMetadata))])));
+
+            Assert.Equal(subset.Count, read.Count);
+            foreach (var n in subset)
+                Assert.Equal(full[$"a{n:D2}"].IdempotencyKey, read[$"a{n:D2}"].IdempotencyKey);
+        }
+    }
+
+    [Fact]
+    public async Task The_same_installment_of_two_identical_purchases_is_still_told_apart_by_its_ordinal()
+    {
+        // Two identical purchases in the same second, each in installments: 09/12 twice is a genuine pair of lines.
+        var twin = TailLine(9);
+        twin["id"] = "00000000-0000-4000-8000-000000000b09";
+        const string identity = $"{CardAccountKey}|2025-06-17T13:05:00Z|D|287.45|9/12";
+
+        var forward = await SyncAsync(new JsonArray(TailLine(8), TailLine(9), twin.DeepClone()));
+        var backward = await SyncAsync(new JsonArray(twin.DeepClone(), TailLine(9), TailLine(8)));
+
+        foreach (var result in new[] { forward, backward })
+        {
+            var events = result.ImportEvents.Where(e => e.ExternalAccountId == CardAccountKey).ToDictionary(e => e.ExternalId[^4..], StringComparer.Ordinal);
+            Assert.Equal(3, events.Values.Select(e => e.IdempotencyKey).Distinct().Count());
+            // Ordinals follow Pluggy's ids within the pair; 08/12 has an identity of its own.
+            Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey(identity, 0), events["0a09"].IdempotencyKey);
+            Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey(identity, 1), events["0b09"].IdempotencyKey);
+            Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2025-06-17T13:05:00Z|D|287.45|8/12", 0), events["0a08"].IdempotencyKey);
+        }
+    }
+
+    [Fact]
+    public void A_line_that_is_not_an_installment_keeps_the_line_identity_of_before_1424()
+    {
+        static OpenFinanceTransaction Line(string? description, OpenFinanceCardLineDetails? details) =>
+            new("t", new DateTimeOffset(2026, 3, 2, 19, 10, 5, TimeSpan.Zero), OpenFinanceDirection.Debit, 1234.5m,
+                "CARD", null, description, null, null, false, null, JsonDocument.Parse("{}").RootElement)
+            {
+                CardDetails = details,
+            };
+        var checking = new OpenFinanceAccount("k", OpenFinanceAccountKind.Deposit, BrazilianBankAccount.Create("077", "0001", "12345678-9"), "077", null, "BRL", 0m);
+
+        // Account, instant to the second, direction, amount: nothing else, byte for byte.
+        Assert.Equal($"{CardAccountKey}|2026-03-02T19:10:05Z|D|1234.50",
+            OpenFinanceTransactionMapper.LineIdentity(Card1234, Line("LOJA EXEMPLO", null)));
+        Assert.Equal($"{CardAccountKey}|2026-03-02T19:10:05Z|D|1234.50",
+            OpenFinanceTransactionMapper.LineIdentity(Card1234, Line("LOJA EXEMPLO 01/06", new OpenFinanceCardLineDetails { PaymentType = "SINGLE", BillPostDate = new DateOnly(2026, 3, 5) })));
+        Assert.Equal($"{CardAccountKey}|2026-03-02T19:10:05Z|D|1234.50",
+            OpenFinanceTransactionMapper.LineIdentity(Card1234, Line("LOJA EXEMPLO 15/10", null))); // number past the count
+        Assert.Equal("br:077:0001:123456789|2026-03-02T19:10:05Z|D|1234.50",
+            OpenFinanceTransactionMapper.LineIdentity(checking, Line("PIX ENVIADO 01/02", null))); // a deposit line is never an installment
+
+        // An installment adds its number and count, whether they came from the source or from the description.
+        Assert.Equal($"{CardAccountKey}|2026-03-02T19:10:05Z|D|1234.50|5/6",
+            OpenFinanceTransactionMapper.LineIdentity(Card1234, Line(null, new OpenFinanceCardLineDetails { InstallmentNumber = 5, InstallmentCount = 6 })));
+        Assert.Equal($"{CardAccountKey}|2026-03-02T19:10:05Z|D|1234.50|5/6",
+            OpenFinanceTransactionMapper.LineIdentity(Card1234, Line("LOJA EXEMPLO 05/06", null)));
+    }
+
+    /// <summary>
+    /// Story #1424. Installment 02/06 of a purchase made a year earlier reaches Pluggy with its bill post date as
+    /// <c>date</c>, inside an incremental read, while <c>transactionDateTime</c> is still the purchase instant. The plugin
+    /// sends it by its event's date (the bill post date), once, with the key a full read gives it, although the windowed
+    /// read does not hold installment 01/06. The checkpoint still goes by the booking date.
     /// </summary>
     [Fact]
-    public async Task An_installment_of_an_older_purchase_is_not_sent_on_an_incremental_read()
+    public async Task An_installment_of_an_older_purchase_is_sent_once_on_an_incremental_read()
     {
-        var line = InstallmentLines().Single(l => Text(l!["id"])!.EndsWith("f10", StringComparison.Ordinal))!.DeepClone();
-        line["date"] = "2026-10-08T03:00:00.000Z";
-        line["creditCardMetadata"]!["billPostDate"] = "2026-10-08";
+        var lines = InstallmentLines();
+        var first = lines.Single(l => Text(l!["id"])!.EndsWith("f01", StringComparison.Ordinal))!.DeepClone();
+        var second = lines.Single(l => Text(l!["id"])!.EndsWith("f10", StringComparison.Ordinal))!.DeepClone();
+        second["date"] = "2026-10-08T03:00:00.000Z";
+        second["creditCardMetadata"]!["billPostDate"] = "2026-10-08";
+        var windowStart = new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.Zero);
 
-        var incremental = await SyncAsync(new JsonArray(line.DeepClone()), windowStart: new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.Zero));
+        var full = CardEvents(await SyncAsync(new JsonArray(first.DeepClone(), second.DeepClone())));
+        var incremental = await SyncAsync(new JsonArray(first.DeepClone(), second.DeepClone()), windowStart);
+        var nextDay = await SyncAsync(new JsonArray(first.DeepClone(), second.DeepClone()), windowStart.AddDays(1));
 
         var row = JsonNode.Parse(incremental.ProviderDiagnosticsJson!)!["accounts"]!.AsArray()
             .Single(a => Text(a!["externalAccountId"]) == CardAccountKey)!;
-        Assert.Equal(1, row["posted"]!.GetValue<int>()); // read...
-        Assert.Equal(0, row["sent"]!.GetValue<int>());   // ...but not sent (#1424)
-        Assert.Empty(CardEvents(incremental));
+        Assert.Equal(1, row["posted"]!.GetValue<int>()); // 01/06 (Pluggy date a year ago) is outside the read
+        Assert.Equal(1, row["sent"]!.GetValue<int>());
+        var sent = Assert.Single(incremental.ImportEvents, e => e.ExternalAccountId == CardAccountKey);
+        Assert.Equal(full["f10"].IdempotencyKey, sent.IdempotencyKey);
+        Assert.Equal("2026-10-08", Date(sent));
+        // The next day's overlapping read sends it again with the same key, which the host already holds.
+        Assert.Equal(sent.IdempotencyKey, Assert.Single(nextDay.ImportEvents, e => e.ExternalAccountId == CardAccountKey).IdempotencyKey);
+
+        // The checkpoint is the latest booking date read, as documented: the installment's bill date does not move it.
+        var withoutCardLines = await SyncAsync([], windowStart);
+        Assert.Equal(Assert.Single(withoutCardLines.Checkpoints).CursorValue, Assert.Single(incremental.Checkpoints).CursorValue);
+    }
+
+    /// <summary>
+    /// A remaining gap after #1424, pinned: the tail of a long series keeps the purchase date as Pluggy's <c>date</c>
+    /// (its bill post date equals the purchase date), and Pluggy's <c>dateFrom</c> filters on <c>date</c>, so an
+    /// incremental read does not receive the line at all. A full read imports it, dated from its bill.
+    /// </summary>
+    [Fact]
+    public async Task A_tail_installment_whose_pluggy_date_is_the_purchase_date_is_not_read_incrementally()
+    {
+        var line = TailLine(11);
+        line["creditCardMetadata"]!["billId"] = "00000000-0000-4000-8000-0000000000e1"; // the bill due 2026-10-10
+
+        var incremental = await SyncAsync(new JsonArray(line.DeepClone()), windowStart: new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.Zero));
+        var row = JsonNode.Parse(incremental.ProviderDiagnosticsJson!)!["accounts"]!.AsArray()
+            .Single(a => Text(a!["externalAccountId"]) == CardAccountKey)!;
+        Assert.Equal(0, row["posted"]!.GetValue<int>());
 
         var full = CardEvents(await SyncAsync(new JsonArray(line.DeepClone())));
-        Assert.Equal("2026-10-08", Date(full["f10"]));
+        Assert.Equal("2026-10-10", Date(full["a11"]));
     }
 
     [Theory]
