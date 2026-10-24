@@ -112,8 +112,8 @@ public static partial class OpenFinanceTransactionMapper
     /// <item><description>otherwise the line keeps its booking date.</description></item>
     /// </list>
     /// Every other line, a single purchase included, is dated at its booking date. The idempotency key does not depend
-    /// on this date. The shared plugin sends a line when this date is inside the sync window (#1424), so installment 2
-    /// and later of an older purchase is sent when its bill arrives.
+    /// on this date. The shared plugin sends a line when this date or its booking date is inside the sync window (#1424),
+    /// so installment 2 and later of an older purchase is sent when its bill arrives.
     /// </summary>
     public static DateOnly EventDate(OpenFinanceAccount account, OpenFinanceTransaction transaction, OpenFinanceCardBill? bill = null) =>
         Dating(transaction, Installment(account, transaction), bill).Date;

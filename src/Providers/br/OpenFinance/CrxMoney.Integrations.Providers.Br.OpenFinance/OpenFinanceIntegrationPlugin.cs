@@ -16,8 +16,8 @@ namespace CrxMoney.Integrations.Providers.Br.OpenFinance;
 /// <remarks>
 /// A request with <c>ConnectionId &lt;= 0</c> is a connection test (<see cref="IOpenFinanceSource.CheckConnectionAsync"/>).
 /// A sync asks the source for lines booked from <see cref="OverlapDays"/> before the host's window start
-/// (everything when the host gives no start) and sends those whose event is dated from then on (a card installment
-/// by its bill, see <see cref="OpenFinanceTransactionMapper.EventDate"/>). The source returns every line of each
+/// (everything when the host gives no start) and sends those booked from then on, and a card installment also when
+/// its bill is dated from then on (see <see cref="OpenFinanceTransactionMapper.EventDate"/>). The source returns every line of each
 /// booking date it covers, so key ordinals match a full read. The account balance cannot be checked against
 /// a window of lines; it is reported with its date for the host to compare with its ledger. A card's balance is
 /// reported settled (without its pending lines, but with the pending bill payments it received applied) with the
@@ -210,10 +210,10 @@ public abstract class OpenFinanceIntegrationPlugin
                 : null;
 
         // Every posted line and every investment movement the read returned gets its key first: pairing looks at all
-        // of them, sending only at those in the window. A line is sent by the date its event carries
-        // (OpenFinanceTransactionMapper.EventDate): its booking date, or for a card installment the date of its bill, so
-        // installment 2 and later of an older purchase is sent when its bill arrives (#1424). The checkpoint still holds
-        // the latest booking date read.
+        // of them, sending only at those in the window. A line is sent when its booking date or the date its event
+        // carries (OpenFinanceTransactionMapper.EventDate: for a card installment, the date of its bill) is in the window,
+        // so installment 2 and later of an older purchase is sent when its bill arrives (#1424) and every line sent before
+        // is still sent. The checkpoint still holds the latest booking date read.
         var lines = new List<PreparedLine>();
         DateOnly? latest = null;
         var pending = 0;
@@ -228,7 +228,7 @@ public abstract class OpenFinanceIntegrationPlugin
                 lines.Add(new PreparedLine(account, transaction, ordinal,
                     OpenFinanceTransactionMapper.IdempotencyKey(OpenFinanceTransactionMapper.LineIdentity(account, transaction), ordinal),
                     OpenFinanceTransactionMapper.TransferHint(account, transaction),
-                    IsSent(OpenFinanceTransactionMapper.EventDate(account, transaction, BillOf(account, transaction)))));
+                    IsSent(transaction.BookingDate) || IsSent(OpenFinanceTransactionMapper.EventDate(account, transaction, BillOf(account, transaction)))));
             }
         }
 

@@ -348,11 +348,31 @@ public sealed class PluggyCardInstallmentTests
             OpenFinanceTransactionMapper.LineIdentity(Card1234, Line("LOJA EXEMPLO 05/06", null)));
     }
 
+    [Fact]
+    public void The_metadata_decides_the_installment_in_the_identity_over_the_description()
+    {
+        static OpenFinanceTransaction Line(OpenFinanceCardLineDetails details) =>
+            CardLine(details, "LOJA EXEMPLO 02/06");
+
+        // Metadata 3/6 against a description saying 02/06: the metadata wins, in the identity and on the event.
+        var disagreeing = Line(new OpenFinanceCardLineDetails { InstallmentNumber = 3, InstallmentCount = 6 });
+        Assert.Equal($"{CardAccountKey}|2026-03-02T19:10:00Z|D|10.00|3/6", OpenFinanceTransactionMapper.LineIdentity(Card1234, disagreeing));
+        Assert.Equal(OpenFinanceInstallmentSource.Metadata, OpenFinanceTransactionMapper.Installment(Card1234, disagreeing)!.Source);
+
+        // Metadata out of bounds: no installment, and no fallback to the description's suffix.
+        var outOfBounds = Line(new OpenFinanceCardLineDetails { InstallmentNumber = 7, InstallmentCount = 6 });
+        Assert.Equal($"{CardAccountKey}|2026-03-02T19:10:00Z|D|10.00", OpenFinanceTransactionMapper.LineIdentity(Card1234, outOfBounds));
+
+        // Without metadata the description gives 2/6: the same line read both ways changes key (documented).
+        Assert.Equal($"{CardAccountKey}|2026-03-02T19:10:00Z|D|10.00|2/6", OpenFinanceTransactionMapper.LineIdentity(Card1234, Line(new OpenFinanceCardLineDetails())));
+    }
+
     /// <summary>
     /// Story #1424. Installment 02/06 of a purchase made a year earlier reaches Pluggy with its bill post date as
     /// <c>date</c>, inside an incremental read, while <c>transactionDateTime</c> is still the purchase instant. The plugin
-    /// sends it by its event's date (the bill post date), once, with the key a full read gives it, although the windowed
-    /// read does not hold installment 01/06. The checkpoint still goes by the booking date.
+    /// sends it by its event's date (the bill post date, 2026-10-14: later than every bank line of the read), once, with
+    /// the key a full read gives it, although the windowed read does not hold installment 01/06. The checkpoint still goes
+    /// by the booking date.
     /// </summary>
     [Fact]
     public async Task An_installment_of_an_older_purchase_is_sent_once_on_an_incremental_read()
@@ -360,8 +380,8 @@ public sealed class PluggyCardInstallmentTests
         var lines = InstallmentLines();
         var first = lines.Single(l => Text(l!["id"])!.EndsWith("f01", StringComparison.Ordinal))!.DeepClone();
         var second = lines.Single(l => Text(l!["id"])!.EndsWith("f10", StringComparison.Ordinal))!.DeepClone();
-        second["date"] = "2026-10-08T03:00:00.000Z";
-        second["creditCardMetadata"]!["billPostDate"] = "2026-10-08";
+        second["date"] = "2026-10-14T03:00:00.000Z";
+        second["creditCardMetadata"]!["billPostDate"] = "2026-10-14";
         var windowStart = new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.Zero);
 
         var full = CardEvents(await SyncAsync(new JsonArray(first.DeepClone(), second.DeepClone())));
@@ -374,12 +394,14 @@ public sealed class PluggyCardInstallmentTests
         Assert.Equal(1, row["sent"]!.GetValue<int>());
         var sent = Assert.Single(incremental.ImportEvents, e => e.ExternalAccountId == CardAccountKey);
         Assert.Equal(full["f10"].IdempotencyKey, sent.IdempotencyKey);
-        Assert.Equal("2026-10-08", Date(sent));
+        Assert.Equal("2026-10-14", Date(sent));
         // The next day's overlapping read sends it again with the same key, which the host already holds.
         Assert.Equal(sent.IdempotencyKey, Assert.Single(nextDay.ImportEvents, e => e.ExternalAccountId == CardAccountKey).IdempotencyKey);
 
-        // The checkpoint is the latest booking date read, as documented: the installment's bill date does not move it.
+        // The checkpoint is the latest booking date read, as documented: the bank line of 2026-10-10, not the installment's
+        // bill date (2026-10-14), and the same as a read without the card lines.
         var withoutCardLines = await SyncAsync([], windowStart);
+        Assert.Equal("2026-10-10", Assert.Single(incremental.Checkpoints).CursorValue);
         Assert.Equal(Assert.Single(withoutCardLines.Checkpoints).CursorValue, Assert.Single(incremental.Checkpoints).CursorValue);
     }
 

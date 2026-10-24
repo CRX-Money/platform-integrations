@@ -30,7 +30,7 @@ public interface IOpenFinanceSource
     /// <param name="readFrom">
     /// The first booking date (Brazil's calendar) the plugin will send, or <c>null</c> for the full history.
     /// A source must return <b>every</b> posted line booked on or after it and may return earlier lines too
-    /// (the plugin sends only those whose event is dated on or after it). Lines that share a key identity also share their booking date, so a read that
+    /// (the plugin sends only those booked, or for a card installment dated by its bill, on or after it). Lines that share a key identity also share their booking date, so a read that
     /// starts at a whole date numbers them exactly as a full read does and the keys stay the same. A card installment
     /// is sent by its bill's date (<see cref="OpenFinanceTransactionMapper.EventDate"/>), which can be months after
     /// its booking date (the purchase): a source should also return the installment lines put on a bill on or after

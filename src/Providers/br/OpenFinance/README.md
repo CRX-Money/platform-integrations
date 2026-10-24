@@ -41,7 +41,12 @@ has exactly one adapter, that adapter runs.
   already held for other installments of the series, so the host dropped them as
   duplicates; and installment 2 and later of an older purchase was windowed by its
   purchase date, so a daily sync read it and did not send it. Installments that
-  arrived after the first full read were never imported.
+  arrived after the first full read were never imported. Preview.8 also imported
+  some installment lines **twice**: ordinals follow the source's line ids within each
+  read, so a read that held a different subset of a series could give a line an
+  ordinal, and so a key, it had not had in an earlier read; the host inserted the line
+  again under that key (and dropped the line whose key it took). Those duplicates may
+  already be posted as movements.
 
   **The rule.** A card line that is an installment, by the same test as
   `card.installment` (the source's number and count, else the trailing `dd/dd` of
@@ -64,16 +69,29 @@ has exactly one adapter, that adapter runs.
   same installment of two identical purchases in the same second). The bill dates
   are left out of the identity on purpose: Open Finance sends its placeholder
   `billPostDate` (`0001-01-01`) on some posted lines, and the real date arriving
-  later must not change the key. A line keeps its key while it reads as the same
-  installment: a source that stopped reporting the number and count on a line whose
-  description has no suffix (or started calling it `SINGLE`) would change it.
+  later must not change the key.
 
-  **Sending.** A line is sent when the date its event carries (`OccurredAtUtc`: for
-  an installment, the date of its bill by the dating rule below) is on or after the
-  first date the sync sends, seven days before the host's window start. Before, the
-  plugin went by `transactionDate`, which for installment 2 and later is the purchase
-  date. A line that is not an installment is dated at `transactionDate`, so nothing
-  changes for it. The checkpoint keeps its documented meaning, the latest
+  **A line keeps its key while it reads as the same installment.** The number and
+  count come from the source's metadata when it reports both, and only otherwise from
+  the description, so the key changes when what the plugin reads changes:
+  - a source stops reporting the number and count on a line whose description has no
+    `dd/dd` suffix, or starts calling the line `SINGLE`: it stops being an installment;
+  - the mirror case: the metadata appears later on a line that had none and whose
+    description has no suffix: it becomes one;
+  - the metadata and the suffix disagree (metadata 3/6, description "…02/06"): the
+    metadata wins, so a line read first without metadata (as 2/6) and later with it
+    (as 3/6) changes key;
+  - the metadata is out of bounds (a count below 2, a number past the count): the line
+    is not an installment and the description is **not** used instead, so metadata
+    appearing out of bounds on a line read before from its suffix changes its key.
+
+  **Sending.** A line is sent when its `transactionDate` or the date its event carries
+  (`OccurredAtUtc`: for an installment, the date of its bill by the dating rule below)
+  is on or after the first date the sync sends, seven days before the host's window
+  start. Before, the plugin went by `transactionDate` only, which for installment 2 and
+  later is the purchase date; every line preview.8 sent is still sent. A line that is
+  not an installment is dated at `transactionDate`, so nothing changes for it. The
+  checkpoint keeps its documented meaning, the latest
   `transactionDate` of an account line read (an installment's bill date does not move
   it), and pairs still go by `transactionDate`.
 
@@ -88,31 +106,54 @@ has exactly one adapter, that adapter runs.
   IntegrationConnectionId, IdempotencyKey) inserts them again: a full re-read
   duplicates every installment line already imported, and each windowed read
   duplicates the installment lines in its window (the seven days of overlap
-  included). Lines that are not installments are not affected. The host re-keys the
-  existing items by the aggregator's line id, which it stores as `ExternalId`
-  (Pluggy's transaction id, stable for a line): for each incoming event whose key the
-  connection does not hold, an item of the same connection and external account with
-  the same `ExternalId` gets the new key (and, if the host re-dates, the new date)
-  instead of a new item being inserted.
+  included). Lines that are not installments are not affected.
+
+  The host re-keys the existing items by the aggregator's line id, which it stores as
+  `ExternalId` (Pluggy's transaction id, stable for a line while the Pluggy item
+  lives). The step applies **only to events whose provider data carries
+  `card.installment`**: a line that is not an installment and comes back with, say, a
+  corrected amount is a new item today and must stay one. For such an event whose key
+  the connection does not hold, one item of the same connection and external account
+  with the same `ExternalId` (the lowest `Id`) gets the new key, and, if the host
+  re-dates, the new date, instead of a new item being inserted. Pseudo-SQL against
+  `Integration.ImportItem`, with the host's column names:
 
   ```sql
-  -- for each incoming event @e of connection @c, in the transaction that would insert it
-  UPDATE import_item
-     SET IdempotencyKey = @e.IdempotencyKey
-   WHERE TenantUuid = @tenant
-     AND IntegrationConnectionId = @c
-     AND ExternalAccountId = @e.ExternalAccountId
-     AND ExternalId = @e.ExternalId
-     AND IdempotencyKey <> @e.IdempotencyKey;
-  -- then insert @e only when no item of @c holds @e.IdempotencyKey
+  -- for each incoming event @e of connection @c whose ProviderData has card.installment,
+  -- in the transaction that would insert it
+  WITH target AS (
+      SELECT TOP (1) Id
+        FROM Integration.ImportItem
+       WHERE TenantUuid = @tenant
+         AND IntegrationConnectionId = @c
+         AND ExternalAccountId = @e.ExternalAccountId
+         AND ExternalId = @e.ExternalId
+         AND IdempotencyKey <> @e.IdempotencyKey
+       ORDER BY Id)
+  UPDATE i
+     SET IdempotencyKey = @e.IdempotencyKey,
+         UpdatedAt = SYSDATETIMEOFFSET()
+    FROM Integration.ImportItem AS i
+    JOIN target AS t ON t.Id = i.Id
+   WHERE NOT EXISTS (SELECT 1
+                       FROM Integration.ImportItem AS k
+                      WHERE k.TenantUuid = @tenant
+                        AND k.IntegrationConnectionId = @c
+                        AND k.IdempotencyKey = @e.IdempotencyKey);  -- keeps IX_ImportItem_Idempotency unique
+  -- then insert @e only when no item of @c holds @e.IdempotencyKey;
+  -- any other item of @c with the same ExternalAccountId and ExternalId whose IdempotencyKey differs from
+  -- @e's is a duplicate preview.8 imported: flag it for review (it may already be posted: MovementId),
+  -- never delete it silently.
   ```
 
   Keep the step on every sync from the upgrade on: items outside every window keep
   their old key until a full read passes them through it, which is harmless. Until
   the host has the step (or de-duplicates by `ExternalId` some other way), a full
   re-read with this version inserts a duplicate of every installment line already
-  imported: do not run one before. The re-key works for lines read through the same
-  aggregator only, since another aggregator's `ExternalId` differs.
+  imported: do not run one before. The re-key works only while the line keeps its
+  `ExternalId`: lines read through another aggregator, or through a re-created Pluggy
+  item (a reconnect issues new transaction ids), are not re-keyed and come in as new
+  items.
   Code: `OpenFinanceTransactionMapper.LineIdentity`, and the plugin's send test,
   which uses `OpenFinanceTransactionMapper.EventDate`.
 
@@ -344,9 +385,9 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   movement.
 - **Sync behaviour**: pending lines are never imported. The plugin asks the source
   for lines booked from seven days before the host's window start (the full history
-  when the host gives no start) and sends those whose event is dated from then on:
-  the booking date, or for a card installment the date of its bill (#1424), so a
-  later installment of an older purchase is sent when its bill arrives. A source must
+  when the host gives no start) and sends those booked from then on, and a card
+  installment also when its bill is dated from then on (#1424), so a later
+  installment of an older purchase is sent when its bill arrives. A source must
   return every line of each booking date it covers, so lines that differ only by
   ordinal are numbered as in a full read and keep their keys. Investment movements follow the
   same rule: the source returns all of them and the plugin sends those booked from
