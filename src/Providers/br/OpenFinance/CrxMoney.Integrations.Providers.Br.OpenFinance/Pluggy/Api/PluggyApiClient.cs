@@ -120,6 +120,13 @@ internal sealed class PluggyApiClient(HttpClient httpClient, PluggyApiKeyCache a
     public Task<PluggyNumberedRead> GetInvestmentTransactionsAsync(PluggyCredentials credentials, string investmentId, CancellationToken cancellationToken) =>
         GetNumberedAsync(credentials, page => $"investments/{Uri.EscapeDataString(investmentId)}/transactions?page={page}", "investment transactions", cancellationToken);
 
+    /// <summary>
+    /// Walks <c>GET /bills?accountId=</c> by page number: a credit card's bills (faturas), each with its due date, total
+    /// and minimum payment. Pluggy lists every bill it holds for the card; there is no date filter.
+    /// </summary>
+    public Task<PluggyNumberedRead> GetBillsAsync(PluggyCredentials credentials, string accountId, CancellationToken cancellationToken) =>
+        GetNumberedAsync(credentials, page => $"bills?accountId={Uri.EscapeDataString(accountId)}&page={page}", "bills", cancellationToken);
+
     /// <summary>Follows <c>page</c> from 1 to <c>totalPages</c>; an empty page ends the walk early.</summary>
     private async Task<PluggyNumberedRead> GetNumberedAsync(PluggyCredentials credentials, Func<int, string> path, string what, CancellationToken cancellationToken)
     {
