@@ -636,6 +636,7 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
     /// <summary>
     /// A date Pluggy sends as <c>yyyy-mm-dd</c> or as a date-time: a date-time at midnight UTC is a date written as a
     /// date-time and keeps its date part; any other instant is dated in Brazil's calendar, like <c>transactionDateTime</c>.
+    /// Open Finance's placeholder date (<c>0001-01-01</c>, year 1) is no date.
     /// </summary>
     internal static DateOnly? CalendarDate(string? value)
     {
@@ -643,8 +644,8 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
         if (string.IsNullOrEmpty(text))
             return null;
         if (text.Length == 10)
-            return DatePart(text);
-        if (!DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var instant))
+            return DatePart(text) is { Year: > 1 } date ? date : null;
+        if (!DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var instant) || instant.UtcDateTime.Year <= 1)
             return null;
         return instant.UtcDateTime.TimeOfDay == TimeSpan.Zero
             ? DateOnly.FromDateTime(instant.UtcDateTime)

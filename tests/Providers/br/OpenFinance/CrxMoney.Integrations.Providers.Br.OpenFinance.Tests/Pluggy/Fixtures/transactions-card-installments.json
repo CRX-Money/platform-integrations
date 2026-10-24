@@ -3,7 +3,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000f01",
       "accountId": "00000000-0000-4000-8000-0000000000b2",
-      "date": "2025-10-25T03:00:00.000Z",
+      "date": "2025-10-26T03:00:00.000Z",
       "description": "Loja Exemplo Decor 01/06",
       "descriptionRaw": "LOJA EXEMPLO*DECOR01/06",
       "amount": 32.69,
@@ -20,16 +20,42 @@
         "billForecastDate": "2025-11-10",
         "paymentType": "INSTALLMENT",
         "billPostDate": "2025-10-26",
-        "transactionDateTime": "2025-10-25T03:00:00.000Z",
-        "purchaseDate": "2025-10-25T03:00:00.000Z",
+        "transactionDateTime": "2025-10-25T20:22:37.000Z",
+        "purchaseDate": "2025-10-25T20:22:37.000Z",
         "totalInstallments": 6,
         "installmentNumber": 1
       }
     },
     {
+      "id": "00000000-0000-4000-8000-000000000f10",
+      "accountId": "00000000-0000-4000-8000-0000000000b2",
+      "date": "2025-10-28T03:00:00.000Z",
+      "description": "Loja Exemplo Decor 02/06",
+      "descriptionRaw": "LOJA EXEMPLO*DECOR02/06",
+      "amount": 32.69,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": null,
+      "operationTypeAdditionalInfo": null,
+      "merchant": null,
+      "creditCardMetadata": {
+        "cardNumber": "1234",
+        "payeeMCC": 5712,
+        "billId": "00000000-0000-4000-8000-0000000000e6",
+        "billForecastDate": "2025-12-10",
+        "paymentType": "INSTALLMENT",
+        "billPostDate": "2025-10-28",
+        "transactionDateTime": "2025-10-25T20:22:37.000Z",
+        "purchaseDate": "2025-10-25T20:22:37.000Z",
+        "totalInstallments": 6,
+        "installmentNumber": 2
+      }
+    },
+    {
       "id": "00000000-0000-4000-8000-000000000f02",
       "accountId": "00000000-0000-4000-8000-0000000000b2",
-      "date": "2026-08-14T15:30:00.000Z",
+      "date": "2026-09-14T03:00:00.000Z",
       "description": "Moveis Exemplo",
       "descriptionRaw": "MOVEIS EXEMPLO",
       "amount": 200,
@@ -78,7 +104,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000f04",
       "accountId": "00000000-0000-4000-8000-0000000000b2",
-      "date": "2025-12-01T03:00:00.000Z",
+      "date": "2026-03-28T03:00:00.000Z",
       "description": "Anuidade Diferenci 04/10",
       "descriptionRaw": "ANUIDADE DIFERENCI04/10",
       "amount": 41.5,
@@ -100,7 +126,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000f05",
       "accountId": "00000000-0000-4000-8000-0000000000b2",
-      "date": "2026-07-18T03:00:00.000Z",
+      "date": "2026-07-20T03:00:00.000Z",
       "description": "Tintas Exemplo 01/02",
       "descriptionRaw": "TINTAS EXEMPLO 01/02",
       "amount": 75,
@@ -120,7 +146,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000f06",
       "accountId": "00000000-0000-4000-8000-0000000000b2",
-      "date": "2025-12-24T13:05:00.000Z",
+      "date": "2026-10-02T03:00:00.000Z",
       "description": "Ec Exemploinformat 10/12",
       "descriptionRaw": "EC *EXEMPLOINFORMAT10/12",
       "amount": 412.25,
@@ -140,7 +166,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000f07",
       "accountId": "00000000-0000-4000-8000-0000000000b2",
-      "date": "2025-12-01T03:00:00.000Z",
+      "date": "2026-04-28T03:00:00.000Z",
       "description": "Anuidade Diferenci 05/10",
       "descriptionRaw": "ANUIDADE DIFERENCI05/10",
       "amount": 41.6,
@@ -175,8 +201,8 @@
         "billId": null,
         "paymentType": "INSTALLMENT",
         "billPostDate": "0001-01-01T00:00:00.000Z",
-        "transactionDateTime": "2026-10-12T03:00:00.000Z",
-        "purchaseDate": "2026-08-12T03:00:00.000Z",
+        "transactionDateTime": "2026-08-12T18:40:00.000Z",
+        "purchaseDate": "2026-08-12T18:40:00.000Z",
         "totalInstallments": 6,
         "installmentNumber": 3
       }
@@ -184,7 +210,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000f09",
       "accountId": "00000000-0000-4000-8000-0000000000b2",
-      "date": "2025-12-24T13:05:00.000Z",
+      "date": "2025-12-24T03:00:00.000Z",
       "description": "Ec Exemploinformat 08/12",
       "descriptionRaw": "EC *EXEMPLOINFORMAT08/12",
       "amount": 412.27,
@@ -196,13 +222,64 @@
       "merchant": null,
       "creditCardMetadata": {
         "cardNumber": "1234",
-        "billId": "00000000-0000-4000-8000-0000000000ed",
+        "billId": "00000000-0000-4000-8000-0000000000e0",
+        "billForecastDate": "2026-09-10",
         "paymentType": "INSTALLMENT",
         "billPostDate": "2025-12-24",
         "transactionDateTime": "2025-12-24T13:05:00.000Z",
-        "purchaseDate": "2025-12-24T13:07:00.000Z",
+        "purchaseDate": "2025-12-24T13:05:00.000Z",
         "totalInstallments": 12,
         "installmentNumber": 8
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000f11",
+      "accountId": "00000000-0000-4000-8000-0000000000b2",
+      "date": "2025-12-24T03:00:00.000Z",
+      "description": "Ec Exemploinformat 09/12",
+      "descriptionRaw": "EC *EXEMPLOINFORMAT09/12",
+      "amount": 412.26,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": null,
+      "operationTypeAdditionalInfo": null,
+      "merchant": null,
+      "creditCardMetadata": {
+        "cardNumber": "1234",
+        "billId": "00000000-0000-4000-8000-0000000000e1",
+        "billForecastDate": "2026-10-10",
+        "paymentType": "INSTALLMENT",
+        "billPostDate": "2025-12-24",
+        "transactionDateTime": "2025-12-24T13:05:00.000Z",
+        "purchaseDate": "2025-12-24T13:05:00.000Z",
+        "totalInstallments": 12,
+        "installmentNumber": 9
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000f12",
+      "accountId": "00000000-0000-4000-8000-0000000000b2",
+      "date": "2025-12-24T03:00:00.000Z",
+      "description": "Ec Exemploinformat 07/12",
+      "descriptionRaw": "EC *EXEMPLOINFORMAT07/12",
+      "amount": 412.28,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": null,
+      "operationTypeAdditionalInfo": null,
+      "merchant": null,
+      "creditCardMetadata": {
+        "cardNumber": "1234",
+        "billId": "00000000-0000-4000-8000-0000000000ef",
+        "billForecastDate": "2026-08-10",
+        "paymentType": "INSTALLMENT",
+        "billPostDate": "2025-12-24",
+        "transactionDateTime": "2025-12-24T13:05:00.000Z",
+        "purchaseDate": "2025-12-24T13:05:00.000Z",
+        "totalInstallments": 12,
+        "installmentNumber": 7
       }
     }
   ],

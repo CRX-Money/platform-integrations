@@ -46,37 +46,57 @@ has exactly one adapter, that adapter runs.
   | `card.payeeMcc` | the payee's merchant category code, four digits (`"0742"`) | `payeeMCC` (number or string) |
   | `card.installment.number` | the installment number, from 1 | `installmentNumber` |
   | `card.installment.count` | the number of installments, at least 2 | `totalInstallments` |
-  | `card.installment.purchaseDate` | `yyyy-mm-dd`: the purchase date the source reports, else the line's `transactionDate` | `purchaseDate` |
+  | `card.installment.purchaseDate` | `yyyy-mm-dd`: the purchase date the source reports (its placeholder `0001-01-01` counts as missing), else the line's `transactionDate` | `purchaseDate` |
   | `card.installment.totalAmount` | the whole purchase's amount, when reported: **direct connectors only**, Open Finance has none. Information only: never book it as a second movement | `totalAmount` |
   | `card.installment.source` | `metadata` (the source's number and count) or `description` (the trailing `dd/dd` of the description) | — |
+  | `card.installment.dateSource` | what the event's date came from: `billPostDate`, `bill`, `billForecastDate` or `purchase` (see the dating rule) | — |
 
-  **What an installment is.** When the source reports a number and a count, they
-  decide: an installment when the count is at least 2, the number is between 1 and
-  the count, and the payment type is not `SINGLE`. A fee in installments (typed
-  `TARIFA`, "ANUIDADE DIFERENCI04/10") is an installment too, with or without a
-  payment type. When the source reports no number and count, the plugin reads the
-  trailing `dd/dd` of the description, spaced or compact ("TINTAS EXEMPLO 01/02",
-  "LOJA EXEMPLO*DECOR06/06", "EC *EXEMPLOINFORMAT10/12"; never right after a digit),
-  with the same bounds, and says `source: "description"`.
+  **What an installment is.** A line whose payment type is `SINGLE` is never one.
+  Otherwise, when the source reports a number and a count, they decide: an
+  installment when the count is at least 2 and the number is between 1 and the
+  count. The payment type may be missing on any such line: Pluggy sends none on
+  some card lines (it drops `operationType` for cards), and Open Finance requires
+  it only on purchases, so a fee in installments (typed `TARIFA`, "ANUIDADE
+  DIFERENCI04/10") often has none. When the source reports no number and count, the
+  plugin reads the trailing `dd/dd` of the description, spaced or compact ("TINTAS
+  EXEMPLO 01/02", "LOJA EXEMPLO*DECOR06/06", "EC *EXEMPLOINFORMAT10/12"; ASCII
+  digits, never right after a digit), with the same bounds, and says
+  `source: "description"`.
 
-  **Dating rule.** An installment's event (`OccurredAtUtc`) is dated at its
-  `billPostDate`, so the books follow the invoice and a past month stops growing
-  when a later installment arrives. When `billPostDate` is missing, is the
-  placeholder `0001-01-01`, or equals the purchase date, the installment keeps the
-  date it had before (the date of `transactionTime`, which Open Finance issuers set
-  to the purchase). A single purchase and every other line keep that date too.
+  **Dating rule.** An installment's event (`OccurredAtUtc`) is dated from its bill,
+  so the books follow the invoice and a past month stops growing when a later
+  installment arrives. The first of these that is **later than the purchase date**
+  wins, and `dateSource` says which:
+
+  1. `billPostDate`: the date the line was put on its bill (the placeholder
+     `0001-01-01` counts as missing);
+  2. `bill`: the bill the line names in `card.billId`, when the read listed it (the
+     card's `bills` row): its **closing date**, or its **due date** when the bill
+     has no closing date. This covers the tail of long series, whose `billPostDate`
+     equals the purchase date;
+  3. `billForecastDate`: the first day of the month of `card.billForecastDate`;
+  4. `purchase`: the line keeps the date it had before (the date of
+     `transactionTime`, which Open Finance issuers set to the purchase).
+
+  An installment is therefore never dated before its purchase, whatever the source
+  sends. A single purchase and every other line keep the date of `transactionTime`.
   `transactionTime` and `transactionDate` still say when the bank dated the line,
-  and the read window, the checkpoint and pairs still go by `transactionDate`.
+  and the read window, the checkpoint and pairs still go by `transactionDate` (see
+  the known gap on installments of older purchases, #1424).
 
-  **Keys do not move.** The idempotency key is built from the transaction instant,
-  never from the event's date, so an installment line imported before this version
-  gets the same key with a new date. Whether a re-sync re-dates installment lines
-  already imported is the host's decision: the plugin only reports the new date on
-  the event, and a host that drops events whose key it already holds keeps the old
-  date.
+  **Keys do not move, for the same lines.** The idempotency key is built from the
+  transaction instant, never from the event's date, so when a read holds the same
+  set of lines, an installment line imported before this version gets the same key
+  with a new date. That holds only for the same set: the installments of one
+  purchase share one line identity (same instant and amount) and are told apart by
+  their ordinal, so a read that holds more or fewer of them can number them
+  differently (#1424). Whether a re-sync re-dates installment lines already imported
+  is the host's decision: the plugin only reports the new date on the event, and a
+  host that drops events whose key it already holds keeps the old date.
   Code: `OpenFinanceTransactionMapper.Installment` and `.EventDate`, from
   `OpenFinanceTransaction.CardDetails` (`OpenFinanceCardLineDetails`), which an
-  adapter fills from its aggregator's card fields.
+  adapter fills from its aggregator's card fields, and `OpenFinanceLineLinks.Bill`,
+  which the shared plugin fills from the card's bills.
 
 ## Changes in 1.0.0-preview.8
 
@@ -184,7 +204,7 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   key. Switching aggregators on an existing connection therefore imports nothing
   twice. The recipe is part of the package's released behaviour (`docs/versioning.md`).
 - **Dates**: booking date in Brazil's calendar at midnight São Paulo; a card
-  installment is dated at its bill's post date (see the changes after preview.8).
+  installment is dated from its bill (see the changes after preview.8).
 - **Provider data** (schemas `br.openfinance.transaction.deposit`/`.withdrawal` v1):
   `provider` (the aggregator), `channel: "openfinance"`, type and detail,
   description, `counterparty` (name, `taxId` + `taxIdKind` + `taxIdCountry`,
@@ -435,9 +455,10 @@ Limits of the split:
 - **Shared limits.** Additional cards and disaggregated credit lines
   (`creditData.disaggregatedCreditLimits`) can share one limit; the adapter uses the
   account's own `balance` and does not combine lines.
-- Pluggy's bills (`/bills`) are not read: `creditData` and the card lines carry
-  what the split needs, and Pluggy builds the card-side "Pagamento recebido" line
-  from the bill when the institution does not report it.
+- The split does not use Pluggy's bills (`/bills`, read since preview.8 for the
+  card's `bills` row, #1386): `creditData` and the card lines carry what it needs,
+  and Pluggy builds the card-side "Pagamento recebido" line from the bill when the
+  institution does not report it.
 
 #### Investments
 
@@ -478,7 +499,8 @@ Normalisation into the Open Finance model:
 | `paymentData.payer` (credits) / `receiver` (debits): name, `documentNumber`, `routingNumberISPB`, branch, account; the `merchant` for cards or when the name is missing | counterparty (CPF/CNPJ only with valid check digits) |
 | `status` `PENDING` | pending, never imported (but counted in a card's pending amount) |
 | `creditCardMetadata.billId` | card bill |
-| `creditCardMetadata.paymentType`, `installmentNumber`, `totalInstallments`, `purchaseDate`, `totalAmount`, `billPostDate`, `billForecastDate`, `payeeMCC` | card line details (`CardDetails`): bill dates by their `yyyy-mm-dd` part; `purchaseDate` by its date part when it is a date or midnight UTC, else as an instant in Brazil's calendar; `payeeMCC` as four digits |
+| `creditCardMetadata.paymentType`, `installmentNumber`, `totalInstallments`, `purchaseDate`, `totalAmount`, `billPostDate`, `billForecastDate`, `payeeMCC` | card line details (`CardDetails`): bill dates by their `yyyy-mm-dd` part; `purchaseDate` by its date part when it is a date or midnight UTC, else as an instant in Brazil's calendar, and the placeholder `0001-01-01` as no date; `payeeMCC` as four digits |
+| `GET /bills?accountId=` (since preview.8) | the card's bills: its `bills` row, and the closing (else due) date that may date an installment naming the bill |
 | card `balance` + `creditData` | `Card` balance (used limit, includes pending), limit, minimum payment, bill dates |
 
 ### Known gaps
@@ -486,7 +508,17 @@ Normalisation into the Open Finance model:
 - Pluggy's v2 lines carry no Pix end-to-end id or key, and `providerId` came back
   empty in October 2026, so neither is used.
 - Payer names are often empty; the CPF/CNPJ is the reliable counterparty identity.
-- Identity pre-fill (`/identity`) and bills (`/bills`) are not read.
+- Identity pre-fill (`/identity`) is not read. Bills (`/bills`) are read since
+  preview.8 (#1386), best effort.
+- **Installments that arrive after the first full read are not imported by
+  incremental syncs** until the idempotency-key recipe changes (#1424). Each
+  installment of a purchase carries the purchase instant as `transactionDateTime`,
+  so the plugin windows it by the purchase date: installment 2 and later of an older
+  purchase are read (Pluggy's own `date` is the bill post date) but fall before the
+  window and are not sent. Sending them would not be safe yet either: the
+  installments of one purchase share one line identity (same instant and amount)
+  and differ only by their ordinal, which depends on which of them a read holds. A
+  full-history sync imports them.
 - No link between account lines and investment movements, and no card id on the
   checking side of a bill payment: both are paired by the shared plugin by amount
   and date. A sweep with candidates on two positions stays unpaired.
