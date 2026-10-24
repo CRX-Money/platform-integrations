@@ -30,6 +30,21 @@ has exactly one adapter, that adapter runs.
 | --- | --- | --- | --- |
 | Pluggy | `Pluggy` (`PluggyAdapter.Name`) | `.AddPluggy()` | `Pluggy/`, namespace `CrxMoney.Integrations.Providers.Br.OpenFinance.Pluggy` |
 
+## Changes after 1.0.0-preview.7
+
+- **Card bills (#1386).** The plugin reads a card's bills (faturas) and reports them
+  on the card's `accounts` row, after the earlier keys, as `bills`: one object per
+  bill, oldest due date first, with `billId` (the id card lines carry in
+  `card.billId`), `dueDate`, `totalAmount`, and when reported `closeDate`,
+  `minimumPayment`, `currencyCode`, plus `postedLinesRead` (the posted lines of this
+  read that name the bill; a windowed read sees only part of them). A host sets its
+  ledger against the invoice with them. The Pluggy adapter reads
+  `GET /bills?accountId=` for each card, every bill Pluggy holds, best effort: a card
+  whose bills cannot be read has no `bills` and the sync does not fail
+  (`sourceDiagnostics.cardsWithoutBills` counts them, `billPages` the pages read). A
+  source adapter returns them in `OpenFinanceAccountTransactions.Bills`. Events,
+  keys and the other keys are unchanged.
+
 ## Changes in 1.0.0-preview.6
 
 - **Card settled balance (fix).** A bill payment the card still shows pending after
@@ -127,7 +142,11 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   ISPB, branch, account; replaced by `counterpartyIsHolder: true` when the other
   side is the account holder itself, as in sweeps), `pix` when present, `card`
   (last four, bill, `issuerCompe`), a `transferHint` (`investment` for automatic
-  CDB sweeps and similar, `card_bill_payment`), and the aggregator's raw line as
+  CDB sweeps and similar, and for settlements with the bank's own brokerage such
+  as "Saída COR ITAUCOR LIQUIDACAO" or "Entrada COR OPERACOES B3", which
+  aggregators categorise as card payments or dividends; tax the brokerage
+  withholds, "Saída COR IRRF ETF", gets none;
+  `card_bill_payment`), and the aggregator's raw line as
   `sourcePayload`. Added in preview.5, all optional:
   - on a checking line with the `investment` hint, `investment` (`product`: the
     `CDB`/`LCA`/`LCI`/`POUPANCA` the line names; when paired, the position's
@@ -208,7 +227,7 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   | Kind | `balance` | Added fields |
   | --- | --- | --- |
   | `deposit` | the balance the source reports | — |
-  | `creditCard` | **settled** amount owed, as the host books it: the source's figure minus the pending lines when it includes them (`OpenFinanceCardBalance.IncludesPending`), minus the bill payments still pending on the card (applied: the host books them from the paying account) | `pendingAmount` (pending debits minus pending credits), `pendingLines`, `balanceWithPending`, and when reported `creditLimit`, `availableCreditLimit`, `minimumPayment`, `billCloseDate`, `billDueDate`; preview.6 adds `pendingBillPayments` (the pending card credits that are bill payments, counted as applied) and `pendingBillPaymentLines` |
+  | `creditCard` | **settled** amount owed, as the host books it: the source's figure minus the pending lines when it includes them (`OpenFinanceCardBalance.IncludesPending`), minus the bill payments still pending on the card (applied: the host books them from the paying account) | `pendingAmount` (pending debits minus pending credits), `pendingLines`, `balanceWithPending`, and when reported `creditLimit`, `availableCreditLimit`, `minimumPayment`, `billCloseDate`, `billDueDate`; preview.6 adds `pendingBillPayments` (the pending card credits that are bill payments, counted as applied) and `pendingBillPaymentLines`; after preview.7, `bills` (see the changes) |
   | `investment` | the position's net balance, as of `balanceAtUtc` (its reference date) | `externalAccountIdBasis`, `type`, `subtype`, `name`, `issuer`, `status`, `currencyCode`, and when reported `grossAmount`, `amountInvested`, `profit`, `incomeTax`, `financialTax`, `issueDate`, `dueDate` |
 
   A window of lines proves nothing about a balance, so comparing `balance` with

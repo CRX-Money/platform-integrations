@@ -93,6 +93,36 @@ public sealed class BrazilianInstitutionMarksTests
     }
 
     [Fact]
+    public void Every_mark_records_how_it_was_normalised_and_the_file_carries_the_viewBox_it_records()
+    {
+        var methods = new[] { "viewbox-tightened", "background-removed+viewbox-tightened", "unchanged", "manual-review", "not-applicable" };
+        Assert.All(Marks(), m =>
+        {
+            var normalised = m["normalised"];
+            Assert.NotNull(normalised);
+            var method = normalised["method"]!.GetValue<string>();
+            Assert.Contains(method, methods);
+            var removed = normalised["backgroundRemoved"]!.GetValue<bool>();
+            Assert.Equal(method == "background-removed+viewbox-tightened", removed);
+            Assert.Matches("^[0-9a-f]{64}$", normalised["originalSha256"]!.GetValue<string>());
+            Assert.True(normalised["originalBytes"]!.GetValue<int>() > 0);
+
+            // A file that was not changed is the file as downloaded; one that was changed has its own hash.
+            var changed = method is "viewbox-tightened" or "background-removed+viewbox-tightened";
+            Assert.Equal(!changed, normalised["originalSha256"]!.GetValue<string>() == m["sha256"]!.GetValue<string>());
+
+            if (m["mediaType"]!.GetValue<string>() != "image/svg+xml")
+                return;
+
+            var svg = Encoding.UTF8.GetString(Read(BrazilianInstitutionMarks.ResourceNameOf(m["ispb"]!.GetValue<string>())!));
+            var viewBox = System.Text.RegularExpressions.Regex.Match(svg, """<svg\b[^>]*?\sviewBox\s*=\s*["']([^"']+)["']""");
+            Assert.True(viewBox.Success, "an SVG mark keeps a viewBox");
+            Assert.Equal(normalised["viewBoxAfter"]!.GetValue<string>(), viewBox.Groups[1].Value.Trim());
+            Assert.Equal(changed, normalised["viewBoxBefore"]!.GetValue<string>() != normalised["viewBoxAfter"]!.GetValue<string>());
+        });
+    }
+
+    [Fact]
     public void Embedded_marks_are_real_png_or_clean_svg_images()
     {
         foreach (var key in BrazilianInstitutionMarks.Keys)
