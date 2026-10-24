@@ -73,26 +73,26 @@ public sealed class PluggyCardInstallmentTests
         Assert.Equal("00000000-0000-4000-8000-0000000000e7", Text(card["billId"]));
         Assert.Equal("077", Text(card["issuerCompe"]));
         Assert.Equal("INSTALLMENT", Text(card["paymentType"]));
-        Assert.Equal("2025-10-26", Text(card["billPostDate"]));
-        Assert.Equal("2025-11-10", Text(card["billForecastDate"]));
+        Assert.Equal("2025-03-15", Text(card["billPostDate"]));
+        Assert.Equal("2025-04-10", Text(card["billForecastDate"]));
         Assert.Equal("5712", Text(card["payeeMcc"]));
 
         var installment = card["installment"]!;
         Assert.Equal(["number", "count", "purchaseDate", "source", "dateSource"], installment.AsObject().Select(p => p.Key));
         Assert.Equal(1, installment["number"]!.GetValue<int>());
         Assert.Equal(6, installment["count"]!.GetValue<int>());
-        Assert.Equal("2025-10-25", Text(installment["purchaseDate"]));
+        Assert.Equal("2025-03-14", Text(installment["purchaseDate"]));
         Assert.Null(installment["totalAmount"]); // Open Finance reports no total
         Assert.Equal("metadata", Text(installment["source"]));
         Assert.Equal("billPostDate", Text(installment["dateSource"]));
 
         // Dated at the bill post date; transactionTime and transactionDate still say when the bank dated the line.
-        Assert.Equal("2025-10-26", Date(e));
+        Assert.Equal("2025-03-15", Date(e));
         var data = JsonNode.Parse(e.ProviderData!)!;
-        Assert.Equal("2025-10-25", Text(data["transactionDate"]));
+        Assert.Equal("2025-03-14", Text(data["transactionDate"]));
         Assert.Equal("LOJA EXEMPLO*DECOR01/06", Text(data["description"]));
         Assert.NotNull(data["sourcePayload"]);
-        Assert.Equal(32.69m, e.Amount); // the installment, never the purchase
+        Assert.Equal(41.37m, e.Amount); // the installment, never the purchase
     }
 
     [Fact]
@@ -101,10 +101,10 @@ public sealed class PluggyCardInstallmentTests
         var events = await CardEventsAsync(InstallmentLines());
 
         // 01/06 and 02/06: same purchase instant and amount, so one line identity; the ordinal follows Pluggy's ids.
-        const string identity = $"{CardAccountKey}|2025-10-25T20:22:37Z|D|32.69";
+        const string identity = $"{CardAccountKey}|2025-03-14T15:09:26Z|D|41.37";
         Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey(identity, 0), events["f01"].IdempotencyKey);
         Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey(identity, 1), events["f10"].IdempotencyKey);
-        Assert.Equal("2025-10-28", Date(events["f10"]));
+        Assert.Equal("2025-03-17", Date(events["f10"]));
         Assert.Equal("billPostDate", Text(Card(events["f10"])["installment"]!["dateSource"]));
     }
 
@@ -165,7 +165,7 @@ public sealed class PluggyCardInstallmentTests
 
     [Theory]
     [InlineData("f05", 1, 2, "2026-07-18", "2026-07-20")]    // "TINTAS EXEMPLO 01/02": spaced
-    [InlineData("f06", 10, 12, "2025-12-24", "2026-10-02")]  // "EC *EXEMPLOINFORMAT10/12": compact
+    [InlineData("f06", 10, 12, "2025-06-17", "2026-10-02")]  // "EC *EXEMPLOINFORMAT10/12": compact
     public async Task Without_metadata_the_description_suffix_gives_the_installment(string id, int number, int count, string purchaseDate, string eventDate)
     {
         var e = (await CardEventsAsync(InstallmentLines()))[id];
@@ -216,12 +216,12 @@ public sealed class PluggyCardInstallmentTests
         var withBill = (await CardEventsAsync(dated))["f01"];
         var withoutBill = (await CardEventsAsync(undated))["f01"];
 
-        Assert.Equal("2025-10-26", Date(withBill));
-        Assert.Equal("2025-10-25", Date(withoutBill));
+        Assert.Equal("2025-03-15", Date(withBill));
+        Assert.Equal("2025-03-14", Date(withoutBill));
         Assert.Null(Card(withoutBill)["installment"]);
         // Same line, same set of lines read, new date: the key is the one the transaction instant gives, as before #1417.
         Assert.Equal(withoutBill.IdempotencyKey, withBill.IdempotencyKey);
-        Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2025-10-25T20:22:37Z|D|32.69", 0), withBill.IdempotencyKey);
+        Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2025-03-14T15:09:26Z|D|41.37", 0), withBill.IdempotencyKey);
     }
 
     /// <summary>
@@ -314,11 +314,11 @@ public sealed class PluggyCardInstallmentTests
     }
 
     [Theory]
-    [InlineData("2025-10-25", "2025-10-25")]
-    [InlineData("2025-10-25T00:00:00.000Z", "2025-10-25")]   // a date written as a date-time
-    [InlineData("2025-10-25T03:00:00.000Z", "2025-10-25")]   // midnight in São Paulo
-    [InlineData("2025-10-25T01:30:00.000Z", "2025-10-24")]   // an instant: Brazil's calendar
-    [InlineData("2025-10-25T23:30:00-03:00", "2025-10-25")]
+    [InlineData("2025-03-14", "2025-03-14")]
+    [InlineData("2025-03-14T00:00:00.000Z", "2025-03-14")]   // a date written as a date-time
+    [InlineData("2025-03-14T03:00:00.000Z", "2025-03-14")]   // midnight in São Paulo
+    [InlineData("2025-03-14T01:30:00.000Z", "2025-03-13")]   // an instant: Brazil's calendar
+    [InlineData("2025-03-14T23:30:00-03:00", "2025-03-14")]
     [InlineData("0001-01-01", null)]                          // Open Finance's placeholder
     [InlineData("0001-01-01T00:00:00.000Z", null)]
     [InlineData("0001-01-01T03:00:00.000Z", null)]
