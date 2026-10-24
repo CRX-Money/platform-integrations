@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CrxMoney.Integrations.Abstractions.Plugins;
 using CrxMoney.Integrations.Countries.Br;
 
 namespace CrxMoney.Integrations.Providers.Br.OpenFinance;
@@ -173,6 +174,9 @@ public sealed record OpenFinanceSnapshot(
 {
     /// <summary>The connection's investment positions with their movements; empty when the source reads none.</summary>
     public IReadOnlyList<OpenFinanceInvestmentMovements> Investments { get; init; } = [];
+
+    /// <summary>The connector the item reads through, when the source can tell (Inter or Inter Empresas, #1379).</summary>
+    public IntegrationConnector? Connector { get; init; }
 }
 
 /// <summary>One account and its transactions from the requested read date on (see <see cref="IOpenFinanceSource.ReadAsync"/>).</summary>
@@ -239,4 +243,7 @@ public sealed record OpenFinanceConnectionCheck(string Summary, DateTimeOffset? 
 
     /// <summary>COMPE codes of the institutions holding the connection's accounts, when the check read them.</summary>
     public IReadOnlyList<string> AccountOperatorCompes { get; init; } = [];
+
+    /// <summary>The connector the item reads through, when the source can tell (Inter or Inter Empresas, #1379).</summary>
+    public IntegrationConnector? Connector { get; init; }
 }

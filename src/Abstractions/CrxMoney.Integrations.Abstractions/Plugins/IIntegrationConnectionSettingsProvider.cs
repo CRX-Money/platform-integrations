@@ -117,6 +117,27 @@ public sealed record IntegrationConnectionWalkthroughStep(string Text)
 /// <param name="Website">Official website (<c>https://host/</c>), when known: the host can match its host to an account operator it knows.</param>
 public sealed record IntegrationAccountOperator(string Name, Uri? Website);
 
+/// <summary>
+/// The aggregator's own entry for an institution (Pluggy calls it a connector) that the connection reads through, when
+/// the institution has several (personal and business entries for one bank: Inter and Inter Empresas). The host names
+/// and marks the connection after it.
+/// </summary>
+/// <param name="Name">The connector's display name (<c>Inter Empresas</c>).</param>
+public sealed record IntegrationConnector(string Name)
+{
+    /// <summary>The aggregator's id of the connector, when known (Pluggy <c>225</c>); the key of its mark in a country package.</summary>
+    public string? Id { get; init; }
+
+    /// <summary>The connector serves companies' accounts (a business, PJ connector).</summary>
+    public bool IsBusiness { get; init; }
+
+    /// <summary>The aggregator's public icon of the connector, when known; hosts prefer a mark a country package ships.</summary>
+    public Uri? IconUrl { get; init; }
+
+    /// <summary>The institution the connector belongs to (its official website), when known.</summary>
+    public Uri? InstitutionWebsite { get; init; }
+}
+
 /// <summary>The outcome of <see cref="IIntegrationConnectionTester.TestConnectionAsync"/>, in provider-neutral terms.</summary>
 /// <param name="Succeeded">The settings work.</param>
 /// <param name="Summary">One or two user-facing sentences. No secrets, no personal data.</param>
@@ -136,6 +157,12 @@ public sealed record IntegrationConnectionTestResult(bool Succeeded, string Summ
 
     /// <summary>The institutions holding the connection's accounts, when the check found them.</summary>
     public IReadOnlyList<IntegrationAccountOperator> AccountOperators { get; init; } = [];
+
+    /// <summary>
+    /// The connector the settings read through, when the plugin can tell (optional; hosts treat its absence as "the
+    /// institution's main connector"). Plugins also write it as <c>connector</c> in the sync result's diagnostics.
+    /// </summary>
+    public IntegrationConnector? Connector { get; init; }
 
     /// <summary>A successful check.</summary>
     public static IntegrationConnectionTestResult Success(string summary) => new(true, summary);

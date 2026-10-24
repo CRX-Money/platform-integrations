@@ -16,7 +16,8 @@ dotnet add package CrxMoney.Integrations.Countries.Br --prerelease
 | `BrazilianBankAccount` | A deposit account as the banks identify it: COMPE + branch + account with check digit. `ExternalAccountId` is `br:{compe}:{branch}:{number}`; cards are `br:{compe}:card:{last4}`; investment positions are `br:{compe}:inv:{basis}:{key}`. |
 | `BrazilBankingCalendar` | São Paulo booking dates; imports are dated at midnight of the booking date (`2026-03-10T00:00-03:00`). |
 | `BrazilianInstitutions` | The account operators: COMPE code to display name and official website (below). |
-| `BrazilianInstitutionMarks` | The marks (logos) that identify those institutions in a connect list: `TryOpen(key, out stream, out mediaType)`; `BrazilianInstitution.MarkResourceName` names the embedded resource (below). |
+| `BrazilianInstitutionMarks` | The marks (logos) that identify those institutions in a connect list: `TryOpen(key, out stream, out mediaType)`; `BrazilianInstitution.MarkResourceName` names the embedded resource (below). `TryOpenConnector(connectorId, ...)` opens a business connector's own mark. |
+| `BrazilianInstitutionConnectors` | The aggregator's connectors per institution: the main one (its icon is the institution's mark) and the business (PJ) variant (Inter Empresas next to Inter): `Find(connectorId)`, `For(compeOrIspb, isBusiness)`. |
 
 Pix key types and ISPB formatting will be added here when a provider needs them.
 
@@ -170,6 +171,17 @@ type, the size and SHA-256 of the file as shipped, how it was normalised (`norma
 time. Its `monogram` list names every institution without a
 mark and why. A test checks that the manifest, the embedded files and the institution list agree, so an
 institution is never in both lists, and never in neither.
+
+Its `connectors` list names the business (PJ) connector next to an institution's main one (Inter Empresas, 225,
+next to Inter, 215): a connector typed business whose name starts with the main connector's or the institution's
+name; one whose name says it serves companies (Empresas, Negócios, PJ, Business) wins over another business product
+of the bank (Itaú Empresas over Itaú BBA, Bradesco Empresas over Bradesco API), then the shortest name. A main
+connector named for companies (Citi's only connector, Citi Empresas) counts as a business one. A mark whose bytes did
+not change keeps the capture time the manifest already records. Each entry has the connector id and name, `kind: business`, the main connector's id, the institution, and
+either its own mark in `Marks/connectors/{connectorId}.svg` (with media type, size, SHA-256 and source URL) or the
+`reason` it has none. A plugin uses this list when the aggregator does not say which connector an item reads: through
+Meu Pluggy every item names the MeuPluggy connector, so the bank of its accounts and whether they belong to a company
+(a CNPJ) pick it (`BrazilianInstitutionConnectors.For`).
 
 The status page has no institution websites, so institutions are matched to connectors by name: exactly
 (without accents, case or punctuation), ignoring spaces (`BTGPactual`), or as the start of the connector's name

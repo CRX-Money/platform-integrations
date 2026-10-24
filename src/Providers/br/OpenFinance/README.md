@@ -206,7 +206,14 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   operator, so no Brazilian bank code has to live in the platform's database.
 - **Run diagnostics** (the provider block the host shows per run): `source`,
   `events`, `pendingSkipped`, `sentFrom` (absent on a full read),
-  `credentialExpiresAtUtc`, `accounts`, `transferPairs` and `sourceDiagnostics`.
+  `credentialExpiresAtUtc`, `accounts`, `transferPairs`, `connector` and `sourceDiagnostics`.
+
+  `connector` (also on a connection test) is the connector the item reads through, when the plugin can tell:
+  `id` (the aggregator's), `name`, `isBusiness`, `iconUrl` (when the aggregator gave one) and
+  `institutionWebsite`. A directly connected Pluggy item names its connector (Inter or Inter Empresas, typed
+  `BUSINESS_BANK` for a business one); an item through Meu Pluggy names MeuPluggy, so the bank of its accounts and
+  their holder (a CNPJ means a company) pick the connector from the country package's list. A host names and marks
+  the connection after it; `IntegrationConnectionTestResult.Connector` carries the same on a connection test.
   Every key is generic (no aggregator names), so a host can render the block as it
   comes.
 

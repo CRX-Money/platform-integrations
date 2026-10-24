@@ -130,6 +130,7 @@ public abstract class OpenFinanceIntegrationPlugin
                 LastRefreshedAtUtc = check.LastRefreshedAt?.ToUniversalTime(),
                 IsSandbox = check.IsSandbox,
                 AccountOperators = operators,
+                Connector = check.Connector,
             };
         }
         catch (OpenFinanceSourceException ex)
@@ -181,6 +182,7 @@ public abstract class OpenFinanceIntegrationPlugin
             writer.WriteString("summary", check.Summary);
             if (check.CredentialExpiresAt is { } expiresAt)
                 writer.WriteString("credentialExpiresAtUtc", expiresAt.ToUniversalTime());
+            WriteConnector(writer, check.Connector);
             WriteRaw(writer, "sourceDiagnostics", check.DiagnosticsJson);
         });
 
@@ -314,6 +316,7 @@ public abstract class OpenFinanceIntegrationPlugin
             WritePairCounts(writer, "investment", investmentPairs.Counts, "positionSideUnpaired");
             WritePairCounts(writer, "cardBillPayment", cardPairs.Counts, "cardSideUnpaired");
             writer.WriteEndObject();
+            WriteConnector(writer, snapshot.Connector);
             WriteRaw(writer, "sourceDiagnostics", snapshot.DiagnosticsJson);
         });
 
@@ -495,6 +498,26 @@ public abstract class OpenFinanceIntegrationPlugin
         && DateOnly.TryParseExact(checkpoint.CursorValue, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
             ? date
             : null;
+
+    /// <summary>
+    /// The connector the item reads through (#1379), as <c>connector</c>: <c>id</c>, <c>name</c>, <c>isBusiness</c>,
+    /// <c>iconUrl</c>, <c>institutionWebsite</c>. Hosts read it to name and mark the connection; absent when unknown.
+    /// </summary>
+    internal static void WriteConnector(Utf8JsonWriter writer, IntegrationConnector? connector)
+    {
+        if (connector is null)
+            return;
+        writer.WriteStartObject("connector");
+        if (connector.Id is { } id)
+            writer.WriteString("id", id);
+        writer.WriteString("name", connector.Name);
+        writer.WriteBoolean("isBusiness", connector.IsBusiness);
+        if (connector.IconUrl is { } icon)
+            writer.WriteString("iconUrl", icon.AbsoluteUri);
+        if (connector.InstitutionWebsite is { } website)
+            writer.WriteString("institutionWebsite", website.AbsoluteUri);
+        writer.WriteEndObject();
+    }
 
     private static void WriteRaw(Utf8JsonWriter writer, string name, string? json)
     {

@@ -13,3 +13,5 @@
 # Marks are compared by hash; never rewrite their bytes.
 src/Countries/br/Marks/*.svg -text
 src/Countries/br/Marks/*.png binary
+src/Countries/br/Marks/connectors/*.svg -text
+src/Countries/br/Marks/connectors/*.png binary

@@ -105,6 +105,7 @@ namespace CrxMoney.Integrations.Abstractions.Plugins
     {
         public IntegrationConnectionTestResult(bool Succeeded, string Summary) { }
         public System.Collections.Generic.IReadOnlyList<CrxMoney.Integrations.Abstractions.Plugins.IntegrationAccountOperator> AccountOperators { get; init; }
+        public CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnector? Connector { get; init; }
         public System.DateTimeOffset? CredentialExpiresAtUtc { get; init; }
         public CrxMoney.Integrations.Abstractions.Sync.IntegrationErrorKind ErrorKind { get; init; }
         public bool? IsSandbox { get; init; }
@@ -126,6 +127,15 @@ namespace CrxMoney.Integrations.Abstractions.Plugins
         public IntegrationConnectionWalkthroughStep(string Text) { }
         public System.Uri? Link { get; init; }
         public string Text { get; init; }
+    }
+    public sealed class IntegrationConnector : System.IEquatable<CrxMoney.Integrations.Abstractions.Plugins.IntegrationConnector>
+    {
+        public IntegrationConnector(string Name) { }
+        public System.Uri? IconUrl { get; init; }
+        public string? Id { get; init; }
+        public System.Uri? InstitutionWebsite { get; init; }
+        public bool IsBusiness { get; init; }
+        public string Name { get; init; }
     }
     public enum IntegrationCredentialSlot
     {
