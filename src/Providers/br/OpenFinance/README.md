@@ -30,7 +30,55 @@ has exactly one adapter, that adapter runs.
 | --- | --- | --- | --- |
 | Pluggy | `Pluggy` (`PluggyAdapter.Name`) | `.AddPluggy()` | `Pluggy/`, namespace `CrxMoney.Integrations.Providers.Br.OpenFinance.Pluggy` |
 
-## Changes after 1.0.0-preview.7
+## Changes after 1.0.0-preview.8
+
+- **Installments on card lines (#1417).** A card line now says whether it is an
+  installment (parcela) of a purchase or a fee, and an installment's event is dated
+  at its bill. New keys inside `card`, after `last4`, `billId` and `issuerCompe`
+  (which, like `description`, `transactionTime`, `transactionDate` and
+  `sourcePayload`, are unchanged); each is present only when the source reports it:
+
+  | Key | Value | Pluggy `creditCardMetadata` |
+  | --- | --- | --- |
+  | `card.paymentType` | `SINGLE` or `INSTALLMENT` (Open Finance `A_VISTA`/`A_PRAZO` read as these) | `paymentType` |
+  | `card.billPostDate` | `yyyy-mm-dd`: the date the line was put on its bill; absent while Open Finance sends its placeholder `0001-01-01` (on no bill yet) | `billPostDate` |
+  | `card.billForecastDate` | `yyyy-mm-dd`: the expected date of the line's bill | `billForecastDate` |
+  | `card.payeeMcc` | the payee's merchant category code, four digits (`"0742"`) | `payeeMCC` (number or string) |
+  | `card.installment.number` | the installment number, from 1 | `installmentNumber` |
+  | `card.installment.count` | the number of installments, at least 2 | `totalInstallments` |
+  | `card.installment.purchaseDate` | `yyyy-mm-dd`: the purchase date the source reports, else the line's `transactionDate` | `purchaseDate` |
+  | `card.installment.totalAmount` | the whole purchase's amount, when reported: **direct connectors only**, Open Finance has none. Information only: never book it as a second movement | `totalAmount` |
+  | `card.installment.source` | `metadata` (the source's number and count) or `description` (the trailing `dd/dd` of the description) | — |
+
+  **What an installment is.** When the source reports a number and a count, they
+  decide: an installment when the count is at least 2, the number is between 1 and
+  the count, and the payment type is not `SINGLE`. A fee in installments (typed
+  `TARIFA`, "ANUIDADE DIFERENCI04/10") is an installment too, with or without a
+  payment type. When the source reports no number and count, the plugin reads the
+  trailing `dd/dd` of the description, spaced or compact ("TINTAS EXEMPLO 01/02",
+  "LOJA EXEMPLO*DECOR06/06", "EC *EXEMPLOINFORMAT10/12"; never right after a digit),
+  with the same bounds, and says `source: "description"`.
+
+  **Dating rule.** An installment's event (`OccurredAtUtc`) is dated at its
+  `billPostDate`, so the books follow the invoice and a past month stops growing
+  when a later installment arrives. When `billPostDate` is missing, is the
+  placeholder `0001-01-01`, or equals the purchase date, the installment keeps the
+  date it had before (the date of `transactionTime`, which Open Finance issuers set
+  to the purchase). A single purchase and every other line keep that date too.
+  `transactionTime` and `transactionDate` still say when the bank dated the line,
+  and the read window, the checkpoint and pairs still go by `transactionDate`.
+
+  **Keys do not move.** The idempotency key is built from the transaction instant,
+  never from the event's date, so an installment line imported before this version
+  gets the same key with a new date. Whether a re-sync re-dates installment lines
+  already imported is the host's decision: the plugin only reports the new date on
+  the event, and a host that drops events whose key it already holds keeps the old
+  date.
+  Code: `OpenFinanceTransactionMapper.Installment` and `.EventDate`, from
+  `OpenFinanceTransaction.CardDetails` (`OpenFinanceCardLineDetails`), which an
+  adapter fills from its aggregator's card fields.
+
+## Changes in 1.0.0-preview.8
 
 - **Card bills (#1386).** The plugin reads a card's bills (faturas) and reports them
   on the card's `accounts` row, after the earlier keys, as `bills`: one object per
@@ -135,13 +183,15 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   becomes the import's `ExternalId` and is kept in provider data, but never in the
   key. Switching aggregators on an existing connection therefore imports nothing
   twice. The recipe is part of the package's released behaviour (`docs/versioning.md`).
-- **Dates**: booking date in Brazil's calendar at midnight São Paulo.
+- **Dates**: booking date in Brazil's calendar at midnight São Paulo; a card
+  installment is dated at its bill's post date (see the changes after preview.8).
 - **Provider data** (schemas `br.openfinance.transaction.deposit`/`.withdrawal` v1):
   `provider` (the aggregator), `channel: "openfinance"`, type and detail,
   description, `counterparty` (name, `taxId` + `taxIdKind` + `taxIdCountry`,
   ISPB, branch, account; replaced by `counterpartyIsHolder: true` when the other
   side is the account holder itself, as in sweeps), `pix` when present, `card`
-  (last four, bill, `issuerCompe`), a `transferHint` (`investment` for automatic
+  (last four, bill, `issuerCompe`; after preview.8 also `paymentType`,
+  `billPostDate`, `billForecastDate`, `payeeMcc` and `installment`), a `transferHint` (`investment` for automatic
   CDB sweeps and similar, and for settlements with the bank's own brokerage such
   as "Saída COR ITAUCOR LIQUIDACAO" or "Entrada COR OPERACOES B3", which
   aggregators categorise as card payments or dividends; tax the brokerage
@@ -428,6 +478,7 @@ Normalisation into the Open Finance model:
 | `paymentData.payer` (credits) / `receiver` (debits): name, `documentNumber`, `routingNumberISPB`, branch, account; the `merchant` for cards or when the name is missing | counterparty (CPF/CNPJ only with valid check digits) |
 | `status` `PENDING` | pending, never imported (but counted in a card's pending amount) |
 | `creditCardMetadata.billId` | card bill |
+| `creditCardMetadata.paymentType`, `installmentNumber`, `totalInstallments`, `purchaseDate`, `totalAmount`, `billPostDate`, `billForecastDate`, `payeeMCC` | card line details (`CardDetails`): bill dates by their `yyyy-mm-dd` part; `purchaseDate` by its date part when it is a date or midnight UTC, else as an instant in Brazil's calendar; `payeeMCC` as four digits |
 | card `balance` + `creditData` | `Card` balance (used limit, includes pending), limit, minimum payment, bill dates |
 
 ### Known gaps
@@ -455,7 +506,8 @@ Normalisation into the Open Finance model:
 `tests/Providers/br/OpenFinance` covers the shared model (mapping, keys, windowing, card balances,
 investments, pairs, institution websites) against a fake source, and, under `Pluggy/`, item states, consent expiry, account
 identification, cursor paging, API-key caching and renewal, sign normalisation,
-counterparties, transfer hints, pending lines, the card balance split, investment
+counterparties, transfer hints, pending lines, the card balance split, card installments and their dates
+(`transactions-card-installments.json`), investment
 positions, movements and their page-number paging, sweep and bill-payment pairs,
 key stability and windowing, and failures, against an in-memory fake of the API
 (`/investments` and `/investments/{id}/transactions` as documented, with paging). The fixtures are **written from synthetic data** in the shape the

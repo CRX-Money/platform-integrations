@@ -3,6 +3,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using CrxMoney.Integrations.Abstractions.Plugins;
 using CrxMoney.Integrations.Abstractions.Sync;
 using CrxMoney.Integrations.Providers.Br.OpenFinance.Tests.Pluggy.Support;
@@ -14,7 +15,7 @@ namespace CrxMoney.Integrations.Providers.Br.OpenFinance.Tests.Pluggy;
 /// The move from <c>CrxMoney.Integrations.Providers.Br.Pluggy</c> to the Open Finance Brasil plugin changes no key,
 /// id or provider data, and the Pluggy adapter implements the connection settings contract.
 /// </summary>
-public sealed class PluggyRenameAndSettingsTests
+public sealed partial class PluggyRenameAndSettingsTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -46,9 +47,19 @@ public sealed class PluggyRenameAndSettingsTests
             Assert.Equal(expected["amount"]!.GetValue<decimal>(), e.Amount);
             Assert.Equal(expected["occurredAtUtc"]!.GetValue<string>(), e.OccurredAtUtc.ToString("O", CultureInfo.InvariantCulture));
             Assert.Equal(expected["schemaId"]!.GetValue<string>(), e.ProviderDataSchemaId);
-            Assert.Equal(expected["providerDataSha256"]!.GetValue<string>(), Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(e.ProviderData!))));
+            Assert.Equal(expected["providerDataSha256"]!.GetValue<string>(), Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(WithoutLaterCardKeys(e.ProviderData!)))));
         }
     }
+
+    /// <summary>
+    /// The provider data without the card keys added after preview.8 (#1417: <c>paymentType</c>, <c>billPostDate</c>,
+    /// <c>billForecastDate</c>, <c>payeeMcc</c>, <c>installment</c>), which the plugin writes right after
+    /// <c>card.issuerCompe</c>. They are cut from the text, not re-serialised, so every other byte is still compared.
+    /// </summary>
+    private static string WithoutLaterCardKeys(string providerData) => LaterCardKeys().Replace(providerData, "$1", 1);
+
+    [GeneratedRegex("""("card":\{[^{}]*"issuerCompe":"[^"]*")(?:,"(?:paymentType|billPostDate|billForecastDate|payeeMcc)":"[^"]*")*(?:,"installment":\{[^{}]*\})?""")]
+    private static partial Regex LaterCardKeys();
 
     [Fact]
     public void The_host_registers_the_pluggy_adapter_through_the_open_finance_plugin()
