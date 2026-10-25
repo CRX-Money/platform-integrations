@@ -254,11 +254,26 @@ public abstract class OpenFinanceIntegrationPlugin
             OpenFinancePairing.CardEarlierDays,
             OpenFinancePairing.CardLaterDays);
 
+        // A card's bills by id, so a card line can be dated at the bill it names (installments, #1417).
+        var bills = snapshot.Accounts
+            .Where(a => a.Account.Kind == OpenFinanceAccountKind.CreditCard)
+            .SelectMany(a => a.Bills.Select(b => (Key: $"{a.Account.ExternalAccountId}|{b.Id.Trim()}", Bill: b)))
+            .GroupBy(b => b.Key, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().Bill, StringComparer.Ordinal);
+
         var events = new List<IntegrationImportEvent>();
         var sentPerAccount = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var line in lines.Where(l => l.IsSent))
         {
-            events.Add(OpenFinanceTransactionMapper.Map(line.Account, line.Transaction, line.Ordinal, source.SourceName, Links(line.Key)));
+            var links = Links(line.Key);
+            if (line.Account.Kind == OpenFinanceAccountKind.CreditCard
+                && line.Transaction.CardBillId?.Trim() is { Length: > 0 } billId
+                && bills.TryGetValue($"{line.Account.ExternalAccountId}|{billId}", out var bill))
+            {
+                links = (links ?? new OpenFinanceLineLinks()) with { Bill = bill };
+            }
+
+            events.Add(OpenFinanceTransactionMapper.Map(line.Account, line.Transaction, line.Ordinal, source.SourceName, links));
             sentPerAccount[line.Account.ExternalAccountId] = sentPerAccount.GetValueOrDefault(line.Account.ExternalAccountId) + 1;
         }
 

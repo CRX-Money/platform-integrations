@@ -153,10 +153,20 @@ internal sealed record PluggyMerchant(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("cnpj")] string? Cnpj);
 
+// Dates other than transactionDateTime are read as text (a date or a date-time); payeeMCC as a number or a string.
+// totalAmount comes from direct connectors only ("Not returned by Open Finance").
 internal sealed record PluggyCardMetadata(
     [property: JsonPropertyName("cardNumber")] string? CardNumber,
     [property: JsonPropertyName("billId")] string? BillId,
-    [property: JsonPropertyName("transactionDateTime")] DateTimeOffset? TransactionDateTime);
+    [property: JsonPropertyName("transactionDateTime")] DateTimeOffset? TransactionDateTime,
+    [property: JsonPropertyName("paymentType")] string? PaymentType = null,
+    [property: JsonPropertyName("installmentNumber")] int? InstallmentNumber = null,
+    [property: JsonPropertyName("totalInstallments")] int? TotalInstallments = null,
+    [property: JsonPropertyName("purchaseDate")] string? PurchaseDate = null,
+    [property: JsonPropertyName("totalAmount")] decimal? TotalAmount = null,
+    [property: JsonPropertyName("billPostDate")] string? BillPostDate = null,
+    [property: JsonPropertyName("billForecastDate")] string? BillForecastDate = null,
+    [property: JsonPropertyName("payeeMCC")] JsonElement? PayeeMcc = null);
 
 internal sealed record PluggyErrorResponse(
     [property: JsonPropertyName("message")] string? Message,

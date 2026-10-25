@@ -130,8 +130,84 @@ public sealed record OpenFinanceTransaction(
     string? CardBillId,
     JsonElement SourcePayload)
 {
-    /// <summary>The booking date in Brazil's calendar.</summary>
+    /// <summary>
+    /// The booking date in Brazil's calendar: the date of <see cref="TransactionTime"/>. The read window, the
+    /// checkpoint and pairing go by it; an installment's import event may be dated later
+    /// (<see cref="OpenFinanceTransactionMapper.EventDate"/>).
+    /// </summary>
     public DateOnly BookingDate => BrazilBankingCalendar.DateOf(TransactionTime);
+
+    /// <summary>
+    /// On a card line: what the source reports beyond the bill (payment type, installment, bill dates, MCC), when it
+    /// reports any of it. It never takes part in the idempotency key.
+    /// </summary>
+    public OpenFinanceCardLineDetails? CardDetails { get; init; }
+}
+
+/// <summary>
+/// The Open Finance Brasil credit-card transaction fields beyond the bill id, as the source reports them. Every field
+/// is optional; the shared mapper decides what an installment is and which date its event gets.
+/// </summary>
+public sealed record OpenFinanceCardLineDetails
+{
+    /// <summary>
+    /// The payment type: <c>SINGLE</c> (à vista) or <c>INSTALLMENT</c> (parcelado). Open Finance's <c>A_VISTA</c> and
+    /// <c>A_PRAZO</c> are accepted and read as these.
+    /// </summary>
+    public string? PaymentType { get; init; }
+
+    /// <summary>The installment number, from 1 (Open Finance <c>chargeIdentificator</c>).</summary>
+    public int? InstallmentNumber { get; init; }
+
+    /// <summary>The number of installments (Open Finance <c>chargeNumber</c>).</summary>
+    public int? InstallmentCount { get; init; }
+
+    /// <summary>The purchase date in Brazil's calendar, when the source reports it.</summary>
+    public DateOnly? PurchaseDate { get; init; }
+
+    /// <summary>The whole purchase's amount, when the source reports it (direct connectors; Open Finance has none).</summary>
+    public decimal? TotalAmount { get; init; }
+
+    /// <summary>
+    /// The date the line was put on its bill (Open Finance <c>billPostDate</c>). Open Finance sends <c>0001-01-01</c>
+    /// while the line is on no bill yet; the mapper treats that date as absent.
+    /// </summary>
+    public DateOnly? BillPostDate { get; init; }
+
+    /// <summary>The expected date of the bill the line is on, when the source reports it.</summary>
+    public DateOnly? BillForecastDate { get; init; }
+
+    /// <summary>The merchant category code (MCC) of the payee, four digits.</summary>
+    public string? PayeeMcc { get; init; }
+}
+
+/// <summary>Where the plugin found that a card line is an installment.</summary>
+public enum OpenFinanceInstallmentSource
+{
+    /// <summary>The source's installment fields (number and count).</summary>
+    Metadata = 0,
+
+    /// <summary>The trailing <c>dd/dd</c> of the description ("LOJA EXEMPLO 01/02", "LOJA EXEMPLO*DECOR06/06").</summary>
+    Description = 1
+}
+
+/// <summary>One installment (parcela) of a card purchase or fee, as the shared mapper reads it.</summary>
+public sealed record OpenFinanceInstallment
+{
+    /// <summary>The installment number, from 1.</summary>
+    public required int Number { get; init; }
+
+    /// <summary>The number of installments, at least 2.</summary>
+    public required int Count { get; init; }
+
+    /// <summary>The purchase date the source reports (its placeholder <c>0001-01-01</c> counts as missing), else the line's booking date.</summary>
+    public required DateOnly PurchaseDate { get; init; }
+
+    /// <summary>The whole purchase's amount, when the source reports it.</summary>
+    public decimal? TotalAmount { get; init; }
+
+    /// <summary>Where the number and count came from.</summary>
+    public required OpenFinanceInstallmentSource Source { get; init; }
 }
 
 /// <summary>A card as the other side of a bill payment knows it.</summary>
@@ -150,7 +226,10 @@ public sealed record OpenFinancePair(string ExternalAccountId, string Idempotenc
     public const string AmountAndDate = "amountAndDate";
 }
 
-/// <summary>What the plugin found on the other side of an account line; written to its provider data.</summary>
+/// <summary>
+/// What the plugin found around an account line: the other side of a transfer-like line (written to its provider
+/// data) and, on a card line, the bill it names.
+/// </summary>
 public sealed record OpenFinanceLineLinks
 {
     /// <summary>The paired event on the other side.</summary>
@@ -161,6 +240,12 @@ public sealed record OpenFinanceLineLinks
 
     /// <summary>On a checking-side investment sweep: the position it moved money to or from.</summary>
     public OpenFinanceInvestment? Investment { get; init; }
+
+    /// <summary>
+    /// On a card line: the bill the line names (<see cref="OpenFinanceTransaction.CardBillId"/>), when the read listed
+    /// it. It may date an installment (<see cref="OpenFinanceTransactionMapper.EventDate"/>) and adds no provider data.
+    /// </summary>
+    public OpenFinanceCardBill? Bill { get; init; }
 }
 
 /// <summary>Everything one read of a connection returned.</summary>

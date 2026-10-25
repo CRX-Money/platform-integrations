@@ -602,7 +602,66 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
             Pix: null, // Pluggy's v2 lines carry no Pix end-to-end id or key.
             IsPending: string.Equals(transaction.Status, "PENDING", StringComparison.OrdinalIgnoreCase),
             CardBillId: FirstNonEmpty(transaction.CreditCardMetadata?.BillId),
-            SourcePayload: line);
+            SourcePayload: line)
+        {
+            CardDetails = isCard ? NormalizeCardDetails(transaction.CreditCardMetadata) : null,
+        };
+    }
+
+    /// <summary>
+    /// The card line's fields beyond the bill: <c>paymentType</c> (<c>SINGLE</c>/<c>INSTALLMENT</c>, Pluggy's names for
+    /// Open Finance's <c>A_VISTA</c>/<c>A_PRAZO</c>), <c>installmentNumber</c> and <c>totalInstallments</c>
+    /// (<c>chargeIdentificator</c>/<c>chargeNumber</c>), <c>purchaseDate</c>, <c>totalAmount</c> (direct connectors only),
+    /// <c>billPostDate</c>, <c>billForecastDate</c> and <c>payeeMCC</c>. Null when the line has none of them.
+    /// </summary>
+    internal static OpenFinanceCardLineDetails? NormalizeCardDetails(PluggyCardMetadata? metadata)
+    {
+        if (metadata is null)
+            return null;
+
+        var details = new OpenFinanceCardLineDetails
+        {
+            PaymentType = FirstNonEmpty(metadata.PaymentType)?.ToUpperInvariant(),
+            InstallmentNumber = metadata.InstallmentNumber,
+            InstallmentCount = metadata.TotalInstallments,
+            PurchaseDate = CalendarDate(metadata.PurchaseDate),
+            TotalAmount = metadata.TotalAmount is { } total ? Math.Abs(total) : null,
+            BillPostDate = DatePart(metadata.BillPostDate),
+            BillForecastDate = DatePart(metadata.BillForecastDate),
+            PayeeMcc = MerchantCategoryCode(metadata.PayeeMcc),
+        };
+        return details == new OpenFinanceCardLineDetails() ? null : details;
+    }
+
+    /// <summary>
+    /// A date Pluggy sends as <c>yyyy-mm-dd</c> or as a date-time: a date-time at midnight UTC is a date written as a
+    /// date-time and keeps its date part; any other instant is dated in Brazil's calendar, like <c>transactionDateTime</c>.
+    /// Open Finance's placeholder date (<c>0001-01-01</c>, year 1) is no date.
+    /// </summary>
+    internal static DateOnly? CalendarDate(string? value)
+    {
+        var text = value?.Trim();
+        if (string.IsNullOrEmpty(text))
+            return null;
+        if (text.Length == 10)
+            return DatePart(text) is { Year: > 1 } date ? date : null;
+        if (!DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var instant) || instant.UtcDateTime.Year <= 1)
+            return null;
+        return instant.UtcDateTime.TimeOfDay == TimeSpan.Zero
+            ? DateOnly.FromDateTime(instant.UtcDateTime)
+            : BrazilBankingCalendar.DateOf(instant);
+    }
+
+    /// <summary>The payee's MCC as four digits, from a number or a string; null when it is not one.</summary>
+    internal static string? MerchantCategoryCode(JsonElement? value)
+    {
+        string? digits = value?.ValueKind switch
+        {
+            JsonValueKind.Number when value.Value.TryGetInt32(out var number) && number is >= 0 and <= 9999 => number.ToString(CultureInfo.InvariantCulture),
+            JsonValueKind.String => value.Value.GetString()?.Trim(),
+            _ => null,
+        };
+        return digits is { Length: >= 1 and <= 4 } && digits.All(char.IsAsciiDigit) ? digits.PadLeft(4, '0') : null;
     }
 
     private static string NormalizeType(string? operationType, string? paymentMethod)
