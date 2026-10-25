@@ -32,16 +32,26 @@ public static partial class OpenFinanceTransactionMapper
 
     /// <summary>
     /// The part of the idempotency key that identifies a line at the bank: account, instant to the
-    /// second, direction and amount. Counterparty data is deliberately left out: aggregators enrich it
-    /// after the fact and report it unevenly, so it would change keys. Identical lines are told apart
-    /// by an ordinal (see <see cref="IdempotencyKey"/>).
+    /// second, direction and amount (<c>{account}|{yyyy-MM-ddTHH:mm:ssZ}|{C or D}|{amount 0.00}</c>). A card
+    /// installment (<see cref="Installment"/>, from the source's number and count or the description's <c>dd/dd</c>)
+    /// adds <c>|{number}/{count}</c> (<c>|2/6</c>, <c>|10/12</c>, without leading zeros), since every installment of
+    /// a purchase carries the purchase instant and, in an equal-amount series, the same amount (#1424). Counterparty
+    /// data and the bill dates are deliberately left out: aggregators enrich counterparties after the fact and report
+    /// them unevenly, and a bill post date can still be Open Finance's placeholder on a posted line, so either would
+    /// change keys. Lines that are still identical (two identical purchases in the same second) are told apart by an
+    /// ordinal (see <see cref="IdempotencyKey"/>).
     /// </summary>
-    public static string LineIdentity(OpenFinanceAccount account, OpenFinanceTransaction transaction) =>
-        string.Join('|',
+    public static string LineIdentity(OpenFinanceAccount account, OpenFinanceTransaction transaction)
+    {
+        var identity = string.Join('|',
             account.ExternalAccountId,
             transaction.TransactionTime.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
             transaction.Direction == OpenFinanceDirection.Credit ? "C" : "D",
             transaction.Amount.ToString("0.00", CultureInfo.InvariantCulture));
+        return Installment(account, transaction) is { } installment
+            ? string.Create(CultureInfo.InvariantCulture, $"{identity}|{installment.Number}/{installment.Count}")
+            : identity;
+    }
 
     /// <summary>
     /// The idempotency recipe: <c>brof:</c> + the first 32 hex digits of SHA-256(line identity + <c>|</c> + ordinal),
@@ -102,7 +112,8 @@ public static partial class OpenFinanceTransactionMapper
     /// <item><description>otherwise the line keeps its booking date.</description></item>
     /// </list>
     /// Every other line, a single purchase included, is dated at its booking date. The idempotency key does not depend
-    /// on this date.
+    /// on this date. The shared plugin sends a line when this date or its booking date is inside the sync window (#1424),
+    /// so installment 2 and later of an older purchase is sent when its bill arrives.
     /// </summary>
     public static DateOnly EventDate(OpenFinanceAccount account, OpenFinanceTransaction transaction, OpenFinanceCardBill? bill = null) =>
         Dating(transaction, Installment(account, transaction), bill).Date;
@@ -204,8 +215,9 @@ public static partial class OpenFinanceTransactionMapper
 
     /// <summary>
     /// Numbers lines that share a <see cref="LineIdentity"/> (two identical card purchases in the same
-    /// second, say). Identical lines are interchangeable, so any order gives the same set of keys; the
-    /// order is still made deterministic by the source id.
+    /// second, say, or the same installment of two identical purchases). Identical lines are interchangeable, so any
+    /// order gives the same set of keys; the order is still made deterministic by the source id. The installments of
+    /// one purchase never share an identity, so a read that holds only some of them numbers each one 0.
     /// </summary>
     public static IReadOnlyList<(OpenFinanceTransaction Transaction, int Ordinal)> AssignOrdinals(
         OpenFinanceAccount account,

@@ -16,7 +16,8 @@ namespace CrxMoney.Integrations.Providers.Br.OpenFinance;
 /// <remarks>
 /// A request with <c>ConnectionId &lt;= 0</c> is a connection test (<see cref="IOpenFinanceSource.CheckConnectionAsync"/>).
 /// A sync asks the source for lines booked from <see cref="OverlapDays"/> before the host's window start
-/// (everything when the host gives no start) and sends exactly those. The source returns every line of each
+/// (everything when the host gives no start) and sends those booked from then on, and a card installment also when
+/// its bill is dated from then on (see <see cref="OpenFinanceTransactionMapper.EventDate"/>). The source returns every line of each
 /// booking date it covers, so key ordinals match a full read. The account balance cannot be checked against
 /// a window of lines; it is reported with its date for the host to compare with its ledger. A card's balance is
 /// reported settled (without its pending lines, but with the pending bill payments it received applied) with the
@@ -193,10 +194,26 @@ public abstract class OpenFinanceIntegrationPlugin
     {
         var sendFrom = SendFrom(request);
         var snapshot = await source.ReadAsync(request, sendFrom, cancellationToken).ConfigureAwait(false);
-        bool IsSent(DateOnly bookingDate) => sendFrom is not { } from || bookingDate >= from;
+        bool IsSent(DateOnly date) => sendFrom is not { } from || date >= from;
+
+        // A card's bills by id, so a card line can be dated at the bill it names (installments, #1417).
+        var bills = snapshot.Accounts
+            .Where(a => a.Account.Kind == OpenFinanceAccountKind.CreditCard)
+            .SelectMany(a => a.Bills.Select(b => (Key: $"{a.Account.ExternalAccountId}|{b.Id.Trim()}", Bill: b)))
+            .GroupBy(b => b.Key, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().Bill, StringComparer.Ordinal);
+        OpenFinanceCardBill? BillOf(OpenFinanceAccount account, OpenFinanceTransaction transaction) =>
+            account.Kind == OpenFinanceAccountKind.CreditCard
+            && transaction.CardBillId?.Trim() is { Length: > 0 } billId
+            && bills.TryGetValue($"{account.ExternalAccountId}|{billId}", out var bill)
+                ? bill
+                : null;
 
         // Every posted line and every investment movement the read returned gets its key first: pairing looks at all
-        // of them, sending only at those in the window.
+        // of them, sending only at those in the window. A line is sent when its booking date or the date its event
+        // carries (OpenFinanceTransactionMapper.EventDate: for a card installment, the date of its bill) is in the window,
+        // so installment 2 and later of an older purchase is sent when its bill arrives (#1424) and every line sent before
+        // is still sent. The checkpoint still holds the latest booking date read.
         var lines = new List<PreparedLine>();
         DateOnly? latest = null;
         var pending = 0;
@@ -211,7 +228,7 @@ public abstract class OpenFinanceIntegrationPlugin
                 lines.Add(new PreparedLine(account, transaction, ordinal,
                     OpenFinanceTransactionMapper.IdempotencyKey(OpenFinanceTransactionMapper.LineIdentity(account, transaction), ordinal),
                     OpenFinanceTransactionMapper.TransferHint(account, transaction),
-                    IsSent(transaction.BookingDate)));
+                    IsSent(transaction.BookingDate) || IsSent(OpenFinanceTransactionMapper.EventDate(account, transaction, BillOf(account, transaction)))));
             }
         }
 
@@ -254,24 +271,13 @@ public abstract class OpenFinanceIntegrationPlugin
             OpenFinancePairing.CardEarlierDays,
             OpenFinancePairing.CardLaterDays);
 
-        // A card's bills by id, so a card line can be dated at the bill it names (installments, #1417).
-        var bills = snapshot.Accounts
-            .Where(a => a.Account.Kind == OpenFinanceAccountKind.CreditCard)
-            .SelectMany(a => a.Bills.Select(b => (Key: $"{a.Account.ExternalAccountId}|{b.Id.Trim()}", Bill: b)))
-            .GroupBy(b => b.Key, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.First().Bill, StringComparer.Ordinal);
-
         var events = new List<IntegrationImportEvent>();
         var sentPerAccount = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var line in lines.Where(l => l.IsSent))
         {
             var links = Links(line.Key);
-            if (line.Account.Kind == OpenFinanceAccountKind.CreditCard
-                && line.Transaction.CardBillId?.Trim() is { Length: > 0 } billId
-                && bills.TryGetValue($"{line.Account.ExternalAccountId}|{billId}", out var bill))
-            {
+            if (BillOf(line.Account, line.Transaction) is { } bill)
                 links = (links ?? new OpenFinanceLineLinks()) with { Bill = bill };
-            }
 
             events.Add(OpenFinanceTransactionMapper.Map(line.Account, line.Transaction, line.Ordinal, source.SourceName, links));
             sentPerAccount[line.Account.ExternalAccountId] = sentPerAccount.GetValueOrDefault(line.Account.ExternalAccountId) + 1;
