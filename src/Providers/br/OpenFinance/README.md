@@ -30,6 +30,37 @@ has exactly one adapter, that adapter runs.
 | --- | --- | --- | --- |
 | Pluggy | `Pluggy` (`PluggyAdapter.Name`) | `.AddPluggy()` | `Pluggy/`, namespace `CrxMoney.Integrations.Providers.Br.OpenFinance.Pluggy` |
 
+## Changes after 1.0.0-preview.9
+
+- **The installment suffix is read after the location, and a trailing date is never one (#1430).**
+  An issuer can append the place of purchase after the `dd/dd` suffix, glued to it
+  ("MERCADO TESTE01/03CIDADE EXEMPLOBR") or padded with spaces
+  ("LOJA EXEMPLO 03/10      CIDADE EXEMPLO  BR"). Up to preview.9 the suffix had to end the
+  description, so such a line, when the source reported no number and count, got no
+  `card.installment`, no installment identity and no bill date. The plugin now cuts the
+  location first (see "The suffix" in the #1424 entry below). And the suffix may no
+  longer follow a slash: "COMPRA TESTE 12/05/26" (a trailing `dd/mm/yy` date) was read as
+  installment 5 of 26 and is now no installment.
+
+  **Key change for those lines.** A card line whose description carries a location after
+  its suffix (and whose source reports no number and count) is now an installment, so its
+  identity gains `|{number}/{count}` and its key changes; its event is dated from its bill.
+  A line whose description ends in a `dd/mm/yy` date loses the `|{number}/{count}` it had
+  wrongly been given, so its key changes too, and its event goes back to its booking date.
+  Every other line keeps its key byte for byte. Both cases carry the same aggregator line
+  id, so the host's re-key by line id (#1425, #1428: an incoming event whose key the
+  connection does not hold takes over the item of the same connection, external account
+  and `ExternalId`) re-keys them in place instead of inserting them again; keep that step
+  on. The step applies only to events whose provider data carries `card.installment`, so
+  a trailing-date line, which now has none, is **not** re-keyed by it: such a line comes
+  in as a new item next to the one imported under its old key, and the host should flag
+  the pair (same connection, external account and `ExternalId`, different key) for review
+  rather than post both, or, for this upgrade, also apply the re-key step when the item it
+  would take over carries `card.installment` (its old key was an installment key). The
+  version impact is the one #1424 describes: a change to the idempotency key of some
+  lines, listed here as previews require.
+  Code: `OpenFinanceTransactionMapper.Installment` (`InstallmentSuffix`).
+
 ## Changes after 1.0.0-preview.8
 
 - **Breaking for installment keys: an installment line gets its own identity (#1424).**
@@ -70,6 +101,17 @@ has exactly one adapter, that adapter runs.
   are left out of the identity on purpose: Open Finance sends its placeholder
   `billPostDate` (`0001-01-01`) on some posted lines, and the real date arriving
   later must not change the key.
+
+  **The suffix (since #1430).** When the source reports no number and count, they come
+  from the `dd/dd` at the end of the description, read after cutting the location the
+  issuer may append to it. The location is a city name (uppercase `A`-`Z`, words
+  separated by single spaces) followed by the country code `BR`, glued to the city or
+  after spaces, that comes right after the suffix: glued to it (compact,
+  "MERCADO TESTE01/03CIDADE EXEMPLOBR") or after one or more spaces (padded,
+  "LOJA EXEMPLO 03/10      CIDADE EXEMPLO  BR"). Anything else after the suffix means
+  the description has none. The suffix is two ASCII digits, a slash and two ASCII
+  digits, never right after a digit or a slash, so a trailing `dd/mm/yy` date
+  ("COMPRA TESTE 12/05/26", with or without a location after it) is never an installment.
 
   **A line keeps its key while it reads as the same installment.** The number and
   count come from the source's metadata when it reports both, and only otherwise from
@@ -185,7 +227,8 @@ has exactly one adapter, that adapter runs.
   DIFERENCI04/10") often has none. When the source reports no number and count, the
   plugin reads the trailing `dd/dd` of the description, spaced or compact ("TINTAS
   EXEMPLO 01/02", "LOJA EXEMPLO*DECOR06/06", "EC *EXEMPLOINFORMAT10/12"; ASCII
-  digits, never right after a digit), with the same bounds, and says
+  digits, never right after a digit or, since #1430, a slash; a location after it is cut
+  first, see "The suffix" above), with the same bounds, and says
   `source: "description"`.
 
   **Dating rule.** An installment's event (`OccurredAtUtc`) is dated from its bill,

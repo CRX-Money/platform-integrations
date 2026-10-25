@@ -183,6 +183,45 @@ public sealed class PluggyCardInstallmentTests
         Assert.Equal(eventDate, Date(e));
     }
 
+    /// <summary>
+    /// #1430: the issuer's location after the suffix is cut before the suffix is read, in both shapes, so the line gets
+    /// its installment, its identity and its bill date like any other suffix.
+    /// </summary>
+    [Theory]
+    [InlineData("f13", 1, 3, "2026-09-19", "2026-09-21", "63.20")]   // "MERCADO TESTE01/03CIDADE EXEMPLOBR": compact
+    [InlineData("f14", 3, 10, "2026-07-08", "2026-09-22", "129.90")] // "LOJA EXEMPLO MODA 03/10      CIDADE EXEMPLO  BR": padded
+    public async Task A_location_after_the_suffix_is_cut_before_the_suffix_is_read(string id, int number, int count, string purchaseDate, string eventDate, string amount)
+    {
+        var e = (await CardEventsAsync(InstallmentLines()))[id];
+        var installment = Card(e)["installment"]!;
+
+        Assert.Equal(number, installment["number"]!.GetValue<int>());
+        Assert.Equal(count, installment["count"]!.GetValue<int>());
+        Assert.Equal(purchaseDate, Text(installment["purchaseDate"]));
+        Assert.Equal("description", Text(installment["source"]));
+        Assert.Equal("billPostDate", Text(installment["dateSource"]));
+        Assert.Equal(eventDate, Date(e));
+
+        // The installment identity: the number and count join the line identity.
+        var time = DateTimeOffset.Parse(Text(JsonNode.Parse(e.ProviderData!)!["transactionTime"])!, CultureInfo.InvariantCulture).ToUniversalTime();
+        Assert.Equal(
+            OpenFinanceTransactionMapper.IdempotencyKey(
+                string.Create(CultureInfo.InvariantCulture, $"{CardAccountKey}|{time:yyyy-MM-dd'T'HH:mm:ss'Z'}|D|{amount}|{number}/{count}"), 0),
+            e.IdempotencyKey);
+    }
+
+    /// <summary>#1430: a trailing <c>dd/mm/yy</c> date is never an installment, with or without a location after it.</summary>
+    [Theory]
+    [InlineData("f15")] // "COMPRA TESTE 12/05/26"
+    [InlineData("f16")] // "COMPRA TESTE 03/04/26    CIDADE EXEMPLO BR"
+    public async Task A_trailing_date_is_never_an_installment(string id)
+    {
+        var e = (await CardEventsAsync(InstallmentLines()))[id];
+
+        Assert.Null(Card(e)["installment"]);
+        Assert.Equal(Text(JsonNode.Parse(e.ProviderData!)!["transactionDate"]), Date(e)); // dated at its booking date
+    }
+
     [Theory]
     // The tail of a long series: billPostDate equals the purchase date, so the bill dates the line.
     [InlineData("f09", "bill", "2026-09-01")]               // bill e0, read with its closing date
@@ -441,6 +480,20 @@ public sealed class PluggyCardInstallmentTests
     [InlineData(null, null, null, "LOJA EXEMPLO 00/02", false)]
     [InlineData(null, null, null, "LOJA EXEMPLO ١٢/١٣", false)] // Arabic-Indic digits are not [0-9]
     [InlineData(null, null, null, "LOJA EXEMPLO", false)]
+    // #1430: a location after the suffix is cut first, compact or padded.
+    [InlineData(null, null, null, "MERCADO TESTE01/03CIDADE EXEMPLOBR", true)]
+    [InlineData(null, null, null, "MERCADO TESTE 01/03CIDADEBR", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10  CIDADE EXEMPLO BR", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10      CIDADE EXEMPLO  BR  ", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO*DECOR06/06 CIDADE BR", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 CIDADE EXEMPLO", false)]   // no country code: not a location
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 Cidade Exemplo BR", false)] // the location is uppercase
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 LOJA 2 BR", false)]        // a digit is not part of a city
+    [InlineData(null, null, null, "LOJA EXEMPLO 15/10  CIDADE EXEMPLO BR", false)] // number past the count, after the cut too
+    // #1430: a trailing dd/mm/yy date is never an installment.
+    [InlineData(null, null, null, "COMPRA TESTE 12/05/26", false)]
+    [InlineData(null, null, null, "COMPRA TESTE 03/04/26  CIDADE EXEMPLO BR", false)]
+    [InlineData(null, null, null, "COMPRA TESTE 03/04/2026", false)]
     public void The_shared_mapper_decides_what_an_installment_is(string? paymentType, int? number, int? count, string? description, bool expected)
     {
         var line = CardLine(new OpenFinanceCardLineDetails { PaymentType = paymentType, InstallmentNumber = number, InstallmentCount = count }, description);
