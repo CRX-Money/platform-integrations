@@ -61,6 +61,38 @@ has exactly one adapter, that adapter runs.
   lines, listed here as previews require.
   Code: `OpenFinanceTransactionMapper.Installment` (`InstallmentSuffix`).
 
+- **Cards are also read by creation date, so tail installments reach windowed reads (#1426).**
+  For the tail of a long series Pluggy's `date` is the purchase date (its `billPostDate`
+  equals it), and the windowed read filtered `dateFrom` on `date`, so a daily sync never
+  received those lines; only a full-history sync did (the known gap #1424 left). On a
+  windowed sync the Pluggy adapter now reads each credit card twice: by `dateFrom` as
+  before, and by `createdAtFrom` (when Pluggy stored the line) from the same date, the
+  card's read date (`cardTransactionsDateFrom`, at least 62 days before today), at
+  00:00:00.000Z. Pluggy takes no `dateFrom` together with `createdAtFrom`
+  ([reference](https://docs.pluggy.ai/reference/transactions-list-by-cursor)), so it is
+  a read of its own, paged by its own cursor. The lines only the second read returns
+  are added to the first read's by Pluggy's line id: a line both return is kept once.
+  The plugin sends them by its usual test, so a tail installment whose bill is dated in
+  the window is sent, dated from its bill, with the key a full read gives it.
+  Deposit accounts and full-history syncs read as before.
+
+  **Keys and ordinals.** No key recipe changes. The date read still holds every line of
+  each date it covers, and the added lines are dated before it, so they share no line
+  identity with its lines and its ordinals are unchanged. The one exception is a line
+  identical to one in the date read (same account, instant, direction, amount and, for
+  an installment, number and count) but with an older Pluggy `date`, which Open Finance
+  does not produce for one line; it would be numbered with it by line id, as in a full
+  read.
+
+  **Host.** Nothing to change: the added lines are installments the host has not
+  received from a windowed read before (or has from a full read, under the same key),
+  and the re-key by line id (#1425) still applies to them. Diagnostics: `transactionPages`
+  counts the pages of both reads; new keys after `cardTransactionsDateFrom`:
+  `cardTransactionsCreatedAtFrom` (the instant the second read starts at) and
+  `cardLinesByCreatedAt` (the lines only it returned).
+  Code: `PluggyOpenFinanceSource.ReadAsync` and `.MergeById`,
+  `PluggyApiClient.GetTransactionsCreatedFromAsync`.
+
 ## Changes after 1.0.0-preview.8
 
 - **Breaking for installment keys: an installment line gets its own identity (#1424).**
@@ -430,7 +462,8 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   for lines booked from seven days before the host's window start (the full history
   when the host gives no start) and sends those booked from then on, and a card
   installment also when its bill is dated from then on (#1424), so a later
-  installment of an older purchase is sent when its bill arrives. A source must
+  installment of an older purchase is sent when its bill arrives (an adapter must then
+  return it: the Pluggy adapter reads cards by creation date as well, #1426). A source must
   return every line of each booking date it covers, so lines that differ only by
   ordinal are numbered as in a full read and keep their keys. Investment movements follow the
   same rule: the source returns all of them and the plugin sends those booked from
@@ -554,17 +587,28 @@ accounts needs Pluggy's commercial plan or another aggregator.
   (`cardTransactionsDateFrom` in the diagnostics), so every pending purchase of the
   open bill is in the read; see "Card balances" below. An installment line's `date`
   is usually its bill post date, so the window catches installment 2 and later of an
-  older purchase when its bill arrives (the tail of a long series is the exception:
-  see the known gaps).
+  older purchase when its bill arrives. The tail of a long series is the exception:
+  its `date` is the purchase date, so on a windowed sync each card is read a second
+  time, by `createdAtFrom` from the card's read date at 00:00:00.000Z
+  (`cardTransactionsCreatedAtFrom`), with the same cursor paging, and the lines only
+  that read returns are added by Pluggy's line id (#1426). Pluggy's reference
+  documents `createdAtFrom` (`yyyy-mm-ddThh:mm:ss.000Z`, lines created at or after it)
+  and that it cannot be combined with `dateFrom`
+  ([GET /v2/transactions](https://docs.pluggy.ai/reference/transactions-list-by-cursor)).
+  Starting it at the card's read date, not the window start, covers a line Pluggy
+  stored while it was pending (a card purchase stays pending until its bill closes)
+  and posted later.
 
-  **Why `dateFrom` and not `createdAtFrom`.** `createdAtFrom` (when Pluggy stored
-  the line) would also catch a line Pluggy detects late with an older date, but it
-  can return only the later of two identical lines (same second, direction and
-  amount). That line would then get ordinal 0, the first line's key, and the host
-  would drop it as a duplicate. A `dateFrom` window always holds every line of a
-  booking date, so ordinals and keys match a full read. Lines booked up to seven
-  days before the window start are re-read on every sync. A line Pluggy reports
-  later than that is recovered by a full-history sync; the keys make it safe.
+  **Why `dateFrom` first, and `createdAtFrom` only as an addition.** `createdAtFrom`
+  (when Pluggy stored the line) also catches a line Pluggy detects late with an older
+  date, but alone it can return only the later of two identical lines (same second,
+  direction and amount). That line would then get ordinal 0, the first line's key, and
+  the host would drop it as a duplicate. A `dateFrom` window always holds every line
+  of a booking date, so ordinals and keys match a full read; the card read by
+  `createdAtFrom` (#1426) only adds lines dated before that window, merged by line id,
+  and leaves those ordinals alone. Lines booked up to seven days before the window
+  start are re-read on every sync. A deposit line Pluggy reports later than that is
+  recovered by a full-history sync; the keys make it safe.
 - The deposit account's `balance` is reported in the run diagnostics with
   `balanceAtUtc`, the item's `lastUpdatedAt` (Pluggy's last refresh from the bank).
   Rows and events also carry `institutionWebsite` from the country package's
@@ -685,12 +729,11 @@ Normalisation into the Open Finance model:
   installment line has an identity of its own (its number and count join it) and is
   sent by its bill's date, so installment 2 and later of an older purchase is
   imported by the daily sync when Pluggy reports it with its bill post date as
-  `date`, with the key any other read gives it. One shape is still not read
-  incrementally: the tail of a long series, whose `billPostDate` equals the purchase
-  date, keeps the purchase date as Pluggy's `date`, and `dateFrom` filters on
-  `date`, so a windowed read does not receive it. A full-history sync imports it,
-  and after the host migration (changes after preview.8) a full read imports nothing
-  twice. Reading cards by `createdAtFrom` as well would cover it.
+  `date`, with the key any other read gives it. Since #1426 the tail of a long
+  series, whose `date` is the purchase date, is read too, by `createdAtFrom`. A tail
+  installment Pluggy stored before the card's read date (62 days before today) and
+  whose bill is dated later still needs a full-history sync, which imports nothing
+  twice after the host migration (changes after preview.8).
 - No link between account lines and investment movements, and no card id on the
   checking side of a bill payment: both are paired by the shared plugin by amount
   and date. A sweep with candidates on two positions stays unpaired.
@@ -712,7 +755,8 @@ investments, pairs, institution websites) against a fake source, and, under `Plu
 identification, cursor paging, API-key caching and renewal, sign normalisation,
 counterparties, transfer hints, pending lines, the card balance split, card installments and their dates
 (`transactions-card-installments.json`), installment identities across reads of any subset and their windowed
-sending (#1424), investment
+sending (#1424), the installment suffix after a location and trailing dates (#1430), the card read by creation date
+merged by line id with its own paging (#1426), investment
 positions, movements and their page-number paging, sweep and bill-payment pairs,
 key stability and windowing, and failures, against an in-memory fake of the API
 (`/investments` and `/investments/{id}/transactions` as documented, with paging). The fixtures are **written from synthetic data** in the shape the

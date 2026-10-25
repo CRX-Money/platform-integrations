@@ -84,7 +84,8 @@ internal sealed class FakePluggyServer : HttpMessageHandler
 
     /// <summary>
     /// <c>GET /v2/transactions</c> as documented: <c>dateFrom</c>/<c>dateTo</c> (<c>yyyy-mm-dd</c>, on the line's
-    /// <c>date</c>), <c>createdAtFrom</c> (not with <c>dateFrom</c>), and <c>after</c> cursors handed out in
+    /// <c>date</c>), <c>createdAtFrom</c> (<c>yyyy-mm-ddThh:mm:ss.000Z</c>, on the line's <c>createdAt</c>; not with
+    /// <c>dateFrom</c>; a fixture line without <c>createdAt</c> counts as stored before any window), and <c>after</c> cursors handed out in
     /// <c>next</c> as a ready query string that, like Pluggy's example, names only the account and the cursor.
     /// A cursor is only accepted with the account and window it was issued for; unknown parameters are rejected.
     /// </summary>
@@ -96,6 +97,13 @@ internal sealed class FakePluggyServer : HttpMessageHandler
             return Error(HttpStatusCode.BadRequest, "dateFrom cannot be combined with createdAtFrom");
         if (!TryDate(request.Query("dateFrom"), out var dateFrom) || !TryDate(request.Query("dateTo"), out var dateTo))
             return Error(HttpStatusCode.BadRequest, "dateFrom and dateTo must be yyyy-mm-dd");
+        DateTimeOffset? createdAtFrom = null;
+        if (request.Query("createdAtFrom") is { } createdText)
+        {
+            if (!DateTimeOffset.TryParseExact(createdText, "yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var created))
+                return Error(HttpStatusCode.BadRequest, "createdAtFrom must be yyyy-mm-ddThh:mm:ss.000Z");
+            createdAtFrom = created;
+        }
 
         var accountId = request.Query("accountId");
         var fixture = accountId switch
@@ -122,7 +130,10 @@ internal sealed class FakePluggyServer : HttpMessageHandler
             .Where(line =>
             {
                 var date = DateOnly.FromDateTime(DateTimeOffset.Parse(line!["date"]!.GetValue<string>(), CultureInfo.InvariantCulture).UtcDateTime);
-                return (dateFrom is null || date >= dateFrom) && (dateTo is null || date <= dateTo);
+                return (dateFrom is null || date >= dateFrom) && (dateTo is null || date <= dateTo)
+                    && (createdAtFrom is null
+                        || (line["createdAt"]?.GetValue<string>() is { } createdAt
+                            && DateTimeOffset.Parse(createdAt, CultureInfo.InvariantCulture) >= createdAtFrom));
             })
             .ToList();
         var end = offset + TransactionPageSize;

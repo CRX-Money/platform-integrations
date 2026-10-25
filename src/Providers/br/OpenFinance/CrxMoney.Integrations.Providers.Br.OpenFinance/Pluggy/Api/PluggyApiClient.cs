@@ -82,7 +82,19 @@ internal sealed class PluggyApiClient(HttpClient httpClient, PluggyApiKeyCache a
     /// is Pluggy's <c>dateFrom</c> filter (<c>date &gt;= dateFrom</c>, <c>yyyy-mm-dd</c>); without it, every
     /// line Pluggy holds. Pages are chained by the <c>after</c> cursor of each response's <c>next</c>.
     /// </summary>
-    public async Task<PluggyTransactionsRead> GetTransactionsAsync(PluggyCredentials credentials, string accountId, DateOnly? dateFrom, CancellationToken cancellationToken)
+    public Task<PluggyTransactionsRead> GetTransactionsAsync(PluggyCredentials credentials, string accountId, DateOnly? dateFrom, CancellationToken cancellationToken) =>
+        GetTransactionsAsync(credentials, accountId, dateFrom, createdAtFrom: null, cancellationToken);
+
+    /// <summary>
+    /// Walks <c>GET /v2/transactions</c> by when Pluggy stored each line: <c>createdAtFrom</c>
+    /// (<c>createdAt &gt;= createdAtFrom</c>, <c>yyyy-mm-ddThh:mm:ss.000Z</c>), paged like the date read. Pluggy's
+    /// reference for the endpoint (https://docs.pluggy.ai/reference/transactions-list-by-cursor) documents the
+    /// parameter and that it cannot be combined with <c>dateFrom</c>, so it is a read of its own.
+    /// </summary>
+    public Task<PluggyTransactionsRead> GetTransactionsCreatedFromAsync(PluggyCredentials credentials, string accountId, DateTimeOffset createdAtFrom, CancellationToken cancellationToken) =>
+        GetTransactionsAsync(credentials, accountId, dateFrom: null, createdAtFrom, cancellationToken);
+
+    private async Task<PluggyTransactionsRead> GetTransactionsAsync(PluggyCredentials credentials, string accountId, DateOnly? dateFrom, DateTimeOffset? createdAtFrom, CancellationToken cancellationToken)
     {
         var lines = new List<JsonElement>();
         var seenCursors = new HashSet<string>(StringComparer.Ordinal);
@@ -92,7 +104,7 @@ internal sealed class PluggyApiClient(HttpClient httpClient, PluggyApiKeyCache a
             if (pages > MaxPages)
                 throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy returned more than {MaxPages} transaction pages for one account.");
 
-            var path = TransactionsPath(accountId, dateFrom, after);
+            var path = TransactionsPath(accountId, dateFrom, after, createdAtFrom);
             var page = await GetAsync(credentials, path, PluggyJsonContext.Default.PluggyTransactionsPage, "transactions", cancellationToken).ConfigureAwait(false);
             foreach (var line in page.Results ?? [])
                 lines.Add(line.Clone());
@@ -148,14 +160,20 @@ internal sealed class PluggyApiClient(HttpClient httpClient, PluggyApiKeyCache a
     }
 
     /// <summary>
-    /// The query of one page. Every page repeats the account and the window, so the filter holds whether or
-    /// not Pluggy's cursor carries it.
+    /// The query of one page. Every page repeats the account and the window (<c>dateFrom</c>, or
+    /// <c>createdAtFrom</c> as a UTC instant to the millisecond, never both), so the filter holds whether or not
+    /// Pluggy's cursor carries it.
     /// </summary>
-    internal static string TransactionsPath(string accountId, DateOnly? dateFrom, string? after)
+    internal static string TransactionsPath(string accountId, DateOnly? dateFrom, string? after, DateTimeOffset? createdAtFrom = null)
     {
+        if (dateFrom is not null && createdAtFrom is not null)
+            throw new ArgumentException("Pluggy does not accept dateFrom together with createdAtFrom.", nameof(createdAtFrom));
+
         var path = new StringBuilder("v2/transactions?accountId=").Append(Uri.EscapeDataString(accountId));
         if (dateFrom is { } from)
             path.Append("&dateFrom=").Append(from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        if (createdAtFrom is { } createdFrom)
+            path.Append("&createdAtFrom=").Append(Uri.EscapeDataString(createdFrom.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture)));
         if (after is not null)
             path.Append("&after=").Append(Uri.EscapeDataString(after));
         return path.ToString();

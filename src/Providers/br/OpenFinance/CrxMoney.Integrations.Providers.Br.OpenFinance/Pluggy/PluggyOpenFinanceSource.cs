@@ -133,8 +133,15 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
     /// <remarks>
     /// The window is <c>dateFrom</c>, by transaction date, not <c>createdAtFrom</c>, by when Pluggy stored the line:
     /// a date window always holds every line of a booking date, so lines that are identical but for their ordinal
-    /// are numbered as in a full read and keep their keys. A <c>createdAtFrom</c> read can hold only the later of two
-    /// identical lines, which would then take the first one's key and be dropped by the host as a duplicate.
+    /// are numbered as in a full read and keep their keys. A <c>createdAtFrom</c> read alone can hold only the later of
+    /// two identical lines, which would then take the first one's key and be dropped by the host as a duplicate.
+    /// <para>
+    /// Cards are also read by <c>createdAtFrom</c> from the card's read date (#1426), and the lines only that read
+    /// returns are added to the date read's, by line id: the tail installments of a long series keep the purchase date
+    /// as Pluggy's <c>date</c>, so the date window never holds them, while the plugin sends them by their bill's date.
+    /// The date read still holds every line of each date it covers; the added lines are dated before it, so they share
+    /// no key identity with its lines (one line has one Pluggy date) and its ordinals are unchanged.
+    /// </para>
     /// </remarks>
     public async Task<OpenFinanceSnapshot> ReadAsync(IntegrationSyncRequest request, DateOnly? readFrom, CancellationToken cancellationToken)
     {
@@ -155,8 +162,13 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
         DateOnly? cardDateFrom = dateFrom is { } windowFrom
             ? Min(windowFrom, BrazilBankingCalendar.DateOf(timeProvider.GetUtcNow()).AddDays(-CardPendingLookbackDays))
             : null;
+        // The same window by when Pluggy stored the line, for the card lines the date window misses (#1426).
+        DateTimeOffset? cardCreatedAtFrom = cardDateFrom is { } createdFrom
+            ? new DateTimeOffset(createdFrom.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)
+            : null;
         var result = new List<OpenFinanceAccountTransactions>();
         var pages = 0;
+        var cardLinesByCreatedAt = 0;
         int billPages = 0, billsUnread = 0;
         foreach (var account in accounts)
         {
@@ -167,9 +179,18 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
             var from = normalized.Kind == OpenFinanceAccountKind.CreditCard ? cardDateFrom : dateFrom;
             var read = await api.GetTransactionsAsync(credentials, account.Id!, from, cancellationToken).ConfigureAwait(false);
             pages += read.Pages;
+            var lines = read.Lines;
             IReadOnlyList<OpenFinanceCardBill> bills = [];
             if (normalized.Kind == OpenFinanceAccountKind.CreditCard)
             {
+                if (cardCreatedAtFrom is { } createdAtFrom)
+                {
+                    var created = await api.GetTransactionsCreatedFromAsync(credentials, account.Id!, createdAtFrom, cancellationToken).ConfigureAwait(false);
+                    pages += created.Pages;
+                    lines = MergeById(read.Lines, created.Lines, out var added);
+                    cardLinesByCreatedAt += added;
+                }
+
                 var billRead = await ReadBillsAsync(credentials, account.Id!, cancellationToken).ConfigureAwait(false);
                 billPages += billRead.Pages;
                 if (billRead.Bills is null)
@@ -177,7 +198,7 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
                 bills = billRead.Bills ?? [];
             }
 
-            result.Add(new OpenFinanceAccountTransactions(normalized, read.Lines.Select(l => NormalizeTransaction(normalized, l)).ToList())
+            result.Add(new OpenFinanceAccountTransactions(normalized, lines.Select(l => NormalizeTransaction(normalized, l)).ToList())
             {
                 Bills = bills
             });
@@ -190,7 +211,11 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
             if (dateFrom is { } windowFrom)
                 writer.WriteString("transactionsDateFrom", windowFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             if (cardDateFrom is { } cardFrom && result.Any(a => a.Account.Kind == OpenFinanceAccountKind.CreditCard))
+            {
                 writer.WriteString("cardTransactionsDateFrom", cardFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+                writer.WriteString("cardTransactionsCreatedAtFrom", cardCreatedAtFrom!.Value.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture));
+                writer.WriteNumber("cardLinesByCreatedAt", cardLinesByCreatedAt);
+            }
             writer.WriteNumber("transactionPages", pages);
             if (result.Any(a => a.Account.Kind == OpenFinanceAccountKind.CreditCard))
             {
@@ -215,6 +240,32 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
     internal const string SourceIdBasis = "pluggy";
 
     private static DateOnly Min(DateOnly a, DateOnly b) => a < b ? a : b;
+
+    /// <summary>
+    /// The lines of the date read followed by those of the <c>createdAtFrom</c> read it does not hold, by Pluggy's line
+    /// id (#1426): a line both reads return is kept once, as the date read returned it. A line without an id is kept
+    /// as it comes, so normalisation rejects it as before.
+    /// </summary>
+    internal static IReadOnlyList<JsonElement> MergeById(IReadOnlyList<JsonElement> byDate, IReadOnlyList<JsonElement> byCreatedAt, out int added)
+    {
+        var seen = new HashSet<string>(byDate.Select(LineId).OfType<string>(), StringComparer.Ordinal);
+        var merged = new List<JsonElement>(byDate);
+        added = 0;
+        foreach (var line in byCreatedAt)
+        {
+            if (LineId(line) is { } id && !seen.Add(id))
+                continue;
+            merged.Add(line);
+            added++;
+        }
+
+        return merged;
+    }
+
+    private static string? LineId(JsonElement line) =>
+        line.ValueKind == JsonValueKind.Object && line.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String
+            ? FirstNonEmpty(id.GetString())
+            : null;
 
     /// <summary>
     /// A card's bills from <c>GET /bills?accountId=</c> (#1386). Best effort: a bills read that fails (the product

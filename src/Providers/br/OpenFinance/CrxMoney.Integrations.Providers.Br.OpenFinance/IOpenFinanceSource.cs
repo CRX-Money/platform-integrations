@@ -34,7 +34,9 @@ public interface IOpenFinanceSource
     /// starts at a whole date numbers them exactly as a full read does and the keys stay the same. A card installment
     /// is sent by its bill's date (<see cref="OpenFinanceTransactionMapper.EventDate"/>), which can be months after
     /// its booking date (the purchase): a source should also return the installment lines put on a bill on or after
-    /// <paramref name="readFrom"/>, as a window on the aggregator's bill-dated line date does.
+    /// <paramref name="readFrom"/>, as a window on the aggregator's bill-dated line date does, and the ones whose line
+    /// date stays the purchase date (the tail of a long series), which the Pluggy adapter finds by reading cards by
+    /// when the aggregator stored the line as well (#1426).
     /// <para>
     /// Two more rules, whatever <paramref name="readFrom"/> is. A card reported with an
     /// <see cref="OpenFinanceAccount.Card"/> balance that includes pending lines must come with <b>every</b> pending

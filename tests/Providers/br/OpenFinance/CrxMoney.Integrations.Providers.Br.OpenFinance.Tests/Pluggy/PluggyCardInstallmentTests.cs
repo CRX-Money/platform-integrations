@@ -445,24 +445,96 @@ public sealed class PluggyCardInstallmentTests
     }
 
     /// <summary>
-    /// A remaining gap after #1424, pinned: the tail of a long series keeps the purchase date as Pluggy's <c>date</c>
-    /// (its bill post date equals the purchase date), and Pluggy's <c>dateFrom</c> filters on <c>date</c>, so an
-    /// incremental read does not receive the line at all. A full read imports it, dated from its bill.
+    /// The gap #1424 left, closed by #1426: the tail of a long series keeps the purchase date as Pluggy's <c>date</c>
+    /// (its bill post date equals the purchase date), and Pluggy's <c>dateFrom</c> filters on <c>date</c>, so the date
+    /// read of an incremental sync does not hold the line. Cards are also read by <c>createdAtFrom</c> from the same
+    /// date, which holds it (Pluggy stored it when its bill opened), so the windowed read sends it, dated from its bill,
+    /// with the key a full read gives it.
     /// </summary>
     [Fact]
-    public async Task A_tail_installment_whose_pluggy_date_is_the_purchase_date_is_not_read_incrementally()
+    public async Task A_tail_installment_whose_pluggy_date_is_the_purchase_date_is_read_incrementally_by_its_creation_date()
     {
         var line = TailLine(11);
         line["creditCardMetadata"]!["billId"] = "00000000-0000-4000-8000-0000000000e1"; // the bill due 2026-10-10
+        line["createdAt"] = "2026-09-11T06:00:00.000Z";
+        var windowStart = new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.Zero);
 
-        var incremental = await SyncAsync(new JsonArray(line.DeepClone()), windowStart: new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.Zero));
+        var incremental = await SyncAsync(new JsonArray(line.DeepClone()), windowStart);
         var row = JsonNode.Parse(incremental.ProviderDiagnosticsJson!)!["accounts"]!.AsArray()
             .Single(a => Text(a!["externalAccountId"]) == CardAccountKey)!;
-        Assert.Equal(0, row["posted"]!.GetValue<int>());
+        Assert.Equal(1, row["posted"]!.GetValue<int>());
+        Assert.Equal(1, row["sent"]!.GetValue<int>());
+        var source = JsonNode.Parse(incremental.ProviderDiagnosticsJson!)!["sourceDiagnostics"]!;
+        Assert.Equal(1, source["cardLinesByCreatedAt"]!.GetValue<int>());
 
         var full = CardEvents(await SyncAsync(new JsonArray(line.DeepClone())));
-        Assert.Equal("2026-10-10", Date(full["a11"]));
+        var sent = CardEvents(incremental)["a11"];
+        Assert.Equal(full["a11"].IdempotencyKey, sent.IdempotencyKey);
+        Assert.Equal("2026-10-10", Date(sent));
+        Assert.Equal("bill", Text(Card(sent)["installment"]!["dateSource"]));
+
+        // Stored before the card's read date (62 days before today): no read holds it, as before #1426.
+        line["createdAt"] = "2026-08-01T06:00:00.000Z";
+        var stale = await SyncAsync(new JsonArray(line.DeepClone()), windowStart);
+        Assert.Empty(CardEvents(stale));
     }
+
+    /// <summary>
+    /// #1426: a card line both reads return (its <c>date</c> in the window and stored in it) is imported once, with the
+    /// key it has without the second read; both reads are paged by their own cursor and counted in <c>transactionPages</c>.
+    /// </summary>
+    [Fact]
+    public async Task A_line_both_card_reads_return_is_imported_once_and_both_reads_are_paged()
+    {
+        var lines = InstallmentLines();
+        foreach (var line in lines)
+            line!["createdAt"] = "2026-10-13T06:00:00.000Z";
+        var tail = TailLine(11); // f06 is 10/12 of the same series
+        tail["createdAt"] = "2026-10-13T06:00:00.000Z";
+        tail["creditCardMetadata"]!["billId"] = "00000000-0000-4000-8000-0000000000e1";
+        lines.Add(tail);
+        // Sent from 2026-09-18; the card is read from 2026-08-13 (62 days before today), by date and by createdAt.
+        var windowStart = new DateTimeOffset(2026, 9, 25, 12, 0, 0, TimeSpan.Zero);
+
+        var server = FakePluggyServer.WithFixtures();
+        server.CardLines = lines;
+        server.TransactionPageSize = 3;
+        using var host = new PluggyTestHost(server);
+        var result = await host.Plugin.SyncAsync(PluggyTestHost.Request(windowStart: windowStart), Ct);
+        Assert.Equal(IntegrationSyncStatus.Succeeded, result.Status);
+        // The same lines without createdAt: only the date read holds any of them.
+        var baseline = CardEvents(await SyncAsync(InstallmentLines(), windowStart));
+
+        var events = result.ImportEvents.Where(e => e.ExternalAccountId == CardAccountKey).ToList();
+        Assert.Equal(events.Count, events.Select(e => e.ExternalId).Distinct().Count()); // no line twice
+        Assert.Equal(events.Count, events.Select(e => e.IdempotencyKey).Distinct().Count());
+        // Every line the date read sends is sent as before, with the same key. Added: the tail installments only the
+        // createdAt read holds whose bill is in the window (09/12 and 11/12 of the series, both on the bill due 2026-10-10).
+        Assert.Equal(["f06", "f13", "f14", "f15", "f16"], baseline.Keys.Order(StringComparer.Ordinal));
+        var byId = events.ToDictionary(e => e.ExternalId[^3..], StringComparer.Ordinal);
+        foreach (var (id, e) in baseline)
+            Assert.Equal(e.IdempotencyKey, byId[id].IdempotencyKey);
+        Assert.Equal(["a11", "f06", "f11", "f13", "f14", "f15", "f16"], byId.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal("2026-10-10", Date(byId["a11"]));
+        Assert.Equal("2026-10-10", Date(byId["f11"]));
+
+        // The createdAt read pages with its own cursor and window: every line, three a page.
+        var cardRequests = server.TransactionRequests(FakePluggyServer.CardAccountId);
+        var createdAtPages = cardRequests.Where(r => r.Query("createdAtFrom") is not null).ToList();
+        Assert.Equal((lines.Count + 2) / 3, createdAtPages.Count);
+        Assert.All(createdAtPages, r => Assert.Null(r.Query("dateFrom")));
+        Assert.Null(createdAtPages[0].Query("after"));
+        Assert.All(createdAtPages.Skip(1), r => Assert.NotNull(r.Query("after")));
+        var dateReadLines = DateReadLines(lines, new DateOnly(2026, 8, 13));
+        Assert.Equal((dateReadLines + 2) / 3, cardRequests.Count(r => r.Query("createdAtFrom") is null));
+        var source = JsonNode.Parse(result.ProviderDiagnosticsJson!)!["sourceDiagnostics"]!;
+        Assert.Equal(server.RequestsTo("/v2/transactions").Count, source["transactionPages"]!.GetValue<int>());
+        Assert.Equal(lines.Count - dateReadLines, source["cardLinesByCreatedAt"]!.GetValue<int>());
+    }
+
+    /// <summary>How many of <paramref name="lines"/> a date read from <paramref name="from"/> returns (on Pluggy's UTC <c>date</c>).</summary>
+    private static int DateReadLines(JsonArray lines, DateOnly from) =>
+        lines.Count(l => DateOnly.FromDateTime(DateTimeOffset.Parse(Text(l!["date"])!, CultureInfo.InvariantCulture).UtcDateTime) >= from);
 
     [Theory]
     [InlineData("INSTALLMENT", 1, 6, null, true)]
