@@ -147,7 +147,7 @@ public sealed class PluggyIntegrationPluginTests
         Assert.Equal(6, diagnostics["sourceDiagnostics"]!["transactionPages"]!.GetValue<int>()); // 3 bank + 2 card (d01..d03) + 1 card by createdAt (empty)
         Assert.Equal("2026-09-19", diagnostics["sourceDiagnostics"]!["transactionsDateFrom"]!.GetValue<string>());
         Assert.Equal("2026-08-13", diagnostics["sourceDiagnostics"]!["cardTransactionsDateFrom"]!.GetValue<string>());
-        Assert.Equal("2026-08-13T00:00:00Z", diagnostics["sourceDiagnostics"]!["cardTransactionsCreatedAtFrom"]!.GetValue<string>());
+        Assert.Equal("2026-08-13T00:00:00.000Z", diagnostics["sourceDiagnostics"]!["cardTransactionsCreatedAtFrom"]!.GetValue<string>());
         Assert.Equal(0, diagnostics["sourceDiagnostics"]!["cardLinesByCreatedAt"]!.GetValue<int>());
     }
 

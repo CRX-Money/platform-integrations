@@ -214,12 +214,17 @@ public static partial class OpenFinanceTransactionMapper
     /// <summary>
     /// "…01/02" at the end of a description, after a space or straight after the merchant's name, never after a digit or
     /// a slash (so the end of a trailing <c>dd/mm/yy</c> date, "COMPRA 12/05/26", is never read as 05/26). The location
-    /// the issuer may append after the suffix is cut first (#1430): a city name (uppercase <c>A</c>-<c>Z</c>, words
-    /// separated by single spaces) followed by the country code <c>BR</c>, glued to the city or after spaces, either
-    /// glued to the suffix (the compact shape, "LOJA EXEMPLO01/03CIDADE EXEMPLOBR") or after spaces (the padded shape,
-    /// "LOJA EXEMPLO 03/10  CIDADE EXEMPLO BR"). Anything else after the suffix means the description has none.
+    /// the issuer may append after the suffix is cut first (#1430): an optional city name followed by the country code
+    /// <c>BR</c> or <c>BRA</c>, glued to the city or after spaces, either glued to the suffix (the compact shape,
+    /// "LOJA EXEMPLO01/03CIDADE EXEMPLOBR") or after one or more spaces (the padded shape,
+    /// "LOJA EXEMPLO 03/10  CIDADE EXEMPLO BR", or "LOJA EXEMPLO 01/03 BR" with no city). A city is words separated by
+    /// single spaces, each starting with an uppercase letter (<c>\p{Lu}</c>, accented ones included: "SÃO EXEMPLO") and
+    /// made of uppercase letters, dots, apostrophes and hyphens ("S.EXEMPLO", "VILA-EXEMPLO", "PORTO D'EXEMPLO").
+    /// Lowercase is not a location. Anything else after the suffix means the description has none. A trailing
+    /// <c>dd/mm</c> date followed by a location with day ≤ month ("COMPRA 05/10 CIDADE EXEMPLO BR") reads as an
+    /// installment (5 of 10): the description cannot tell the two apart.
     /// </summary>
-    [GeneratedRegex(@"(?<![0-9/])(?<number>[0-9]{2})/(?<count>[0-9]{2})(?:\s*(?<city>[A-Z]+(?: [A-Z]+)*)\s*BR)?\s*$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?<![0-9/])(?<number>[0-9]{2})/(?<count>[0-9]{2})(?:\s*(?:(?<city>\p{Lu}[\p{Lu}.'\-]*(?: \p{Lu}[\p{Lu}.'\-]*)*)\s*)?BRA?)?\s*$", RegexOptions.CultureInvariant)]
     private static partial Regex InstallmentSuffix();
 
     /// <summary>

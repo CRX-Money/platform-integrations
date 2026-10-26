@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CrxMoney.Integrations.Abstractions.Sync;
@@ -480,6 +481,45 @@ public sealed class PluggyCardInstallmentTests
     }
 
     /// <summary>
+    /// #1426: the <c>createdAtFrom</c> read is best effort, like the bills read. When it fails the card keeps the date
+    /// read's lines, keyed as without it, the sync succeeds and <c>cardsWithoutCreatedAtRead</c> counts the card.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.NotFound)]
+    // A 5xx or 429 is retried by the HTTP pipeline before it fails; the test host's fake clock would hold the backoff forever.
+    public async Task A_created_at_read_that_fails_leaves_the_card_with_the_date_reads_lines_and_the_sync_succeeds(HttpStatusCode status)
+    {
+        var lines = InstallmentLines();
+        var tail = TailLine(11);
+        tail["createdAt"] = "2026-10-13T06:00:00.000Z";
+        tail["creditCardMetadata"]!["billId"] = "00000000-0000-4000-8000-0000000000e1";
+        lines.Add(tail);
+        var windowStart = new DateTimeOffset(2026, 9, 25, 12, 0, 0, TimeSpan.Zero);
+        var baseline = CardEvents(await SyncAsync(InstallmentLines(), windowStart));
+
+        var server = FakePluggyServer.WithFixtures();
+        server.CardLines = lines;
+        var transactions = server.Responder("/v2/transactions");
+        server.On("/v2/transactions", (request, call) =>
+            request.Query("createdAtFrom") is not null ? FakePluggyServer.Status(status) : transactions(request, call));
+        using var host = new PluggyTestHost(server);
+        var result = await host.Plugin.SyncAsync(PluggyTestHost.Request(windowStart: windowStart), Ct);
+
+        Assert.Equal(IntegrationSyncStatus.Succeeded, result.Status);
+        Assert.Contains(server.TransactionRequests(FakePluggyServer.CardAccountId), r => r.Query("createdAtFrom") is not null);
+        var events = CardEvents(result);
+        Assert.Equal(baseline.Keys.Order(StringComparer.Ordinal), events.Keys.Order(StringComparer.Ordinal)); // no tail line
+        foreach (var (id, e) in baseline)
+            Assert.Equal(e.IdempotencyKey, events[id].IdempotencyKey);
+        var source = JsonNode.Parse(result.ProviderDiagnosticsJson!)!["sourceDiagnostics"]!;
+        Assert.Equal(1, source["cardsWithoutCreatedAtRead"]!.GetValue<int>());
+        Assert.Equal(0, source["cardLinesByCreatedAt"]!.GetValue<int>());
+        Assert.Equal("2026-08-13T00:00:00.000Z", Text(source["cardTransactionsCreatedAtFrom"]));
+    }
+
+    /// <summary>
     /// #1426: a card line both reads return (its <c>date</c> in the window and stored in it) is imported once, with the
     /// key it has without the second read; both reads are paged by their own cursor and counted in <c>transactionPages</c>.
     /// </summary>
@@ -530,6 +570,9 @@ public sealed class PluggyCardInstallmentTests
         var source = JsonNode.Parse(result.ProviderDiagnosticsJson!)!["sourceDiagnostics"]!;
         Assert.Equal(server.RequestsTo("/v2/transactions").Count, source["transactionPages"]!.GetValue<int>());
         Assert.Equal(lines.Count - dateReadLines, source["cardLinesByCreatedAt"]!.GetValue<int>());
+        Assert.Equal(0, source["cardsWithoutCreatedAtRead"]!.GetValue<int>());
+        // The diagnostics carry the instant as the query sends it.
+        Assert.Equal(createdAtPages[0].Query("createdAtFrom"), Text(source["cardTransactionsCreatedAtFrom"]));
     }
 
     /// <summary>How many of <paramref name="lines"/> a date read from <paramref name="from"/> returns (on Pluggy's UTC <c>date</c>).</summary>
@@ -559,7 +602,24 @@ public sealed class PluggyCardInstallmentTests
     [InlineData(null, null, null, "LOJA EXEMPLO 03/10      CIDADE EXEMPLO  BR  ", true)]
     [InlineData(null, null, null, "LOJA EXEMPLO*DECOR06/06 CIDADE BR", true)]
     [InlineData(null, null, null, "LOJA EXEMPLO 03/10 CIDADE EXEMPLO", false)]   // no country code: not a location
-    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 Cidade Exemplo BR", false)] // the location is uppercase
+    [InlineData(null, null, null, "LOJA EXEMPLO 01/03 SÃO EXEMPLO BR", true)]       // accented uppercase letters
+    [InlineData(null, null, null, "LOJA EXEMPLO01/03SÃO EXEMPLOBR", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 01/03 S.EXEMPLO BR", true)]         // dots, hyphens and apostrophes in the city
+    [InlineData(null, null, null, "LOJA EXEMPLO 01/03 STA. EXEMPLO BR", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 01/03   VILA-EXEMPLO  BR", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO01/03PORTO D'EXEMPLOBR", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 01/03 CIDADE EXEMPLO BRA", true)]   // a three-letter country code
+    [InlineData(null, null, null, "LOJA EXEMPLO01/03CIDADEBRA", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 01/03 BR", true)]                   // the country code with no city
+    [InlineData(null, null, null, "LOJA EXEMPLO 01/03BRA", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 Cidade Exemplo BR", false)] // lowercase is not a location
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 cidade exemplo br", false)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 CIDADE EXEMPLO ARG", false)] // only BR or BRA
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 -EXEMPLO BR", false)]        // a city word starts with a letter
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 CIDADE  EXEMPLO BR", false)] // words of a city are one space apart
+    // Ambiguous, documented: a trailing dd/mm date with day <= month and a location reads as an installment (5 of 10).
+    [InlineData(null, null, null, "COMPRA 05/10 CIDADE EXEMPLO BR", true)]
+    [InlineData(null, null, null, "COMPRA 25/10 CIDADE EXEMPLO BR", false)]        // day > month: never an installment
     [InlineData(null, null, null, "LOJA EXEMPLO 03/10 LOJA 2 BR", false)]        // a digit is not part of a city
     [InlineData(null, null, null, "LOJA EXEMPLO 15/10  CIDADE EXEMPLO BR", false)] // number past the count, after the cut too
     // #1430: a trailing dd/mm/yy date is never an installment.

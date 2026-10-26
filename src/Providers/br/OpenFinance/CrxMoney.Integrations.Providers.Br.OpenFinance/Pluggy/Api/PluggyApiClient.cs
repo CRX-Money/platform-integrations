@@ -173,11 +173,18 @@ internal sealed class PluggyApiClient(HttpClient httpClient, PluggyApiKeyCache a
         if (dateFrom is { } from)
             path.Append("&dateFrom=").Append(from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
         if (createdAtFrom is { } createdFrom)
-            path.Append("&createdAtFrom=").Append(Uri.EscapeDataString(createdFrom.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture)));
+            path.Append("&createdAtFrom=").Append(Uri.EscapeDataString(FormatCreatedAtFrom(createdFrom)));
         if (after is not null)
             path.Append("&after=").Append(Uri.EscapeDataString(after));
         return path.ToString();
     }
+
+    /// <summary>
+    /// A <c>createdAtFrom</c> value as Pluggy documents it, a UTC instant to the millisecond
+    /// (<c>yyyy-mm-ddThh:mm:ss.000Z</c>); the run diagnostics report the same text.
+    /// </summary>
+    internal static string FormatCreatedAtFrom(DateTimeOffset createdAtFrom) =>
+        createdAtFrom.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
 
     /// <summary>
     /// The <c>after</c> cursor of a <c>next</c> value. Pluggy documents <c>next</c> as a ready query string

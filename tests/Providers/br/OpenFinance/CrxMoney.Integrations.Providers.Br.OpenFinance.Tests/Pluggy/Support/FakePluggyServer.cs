@@ -213,6 +213,9 @@ internal sealed class FakePluggyServer : HttpMessageHandler
     private static HttpResponseMessage Error(HttpStatusCode status, string message) =>
         Json(new JsonObject { ["message"] = message, ["code"] = (int)status }.ToJsonString(), status);
 
+    /// <summary>The responder of <paramref name="path"/>, so a test can wrap it.</summary>
+    public Func<RecordedRequest, int, HttpResponseMessage> Responder(string path) => _routes[path];
+
     public FakePluggyServer On(string path, Func<RecordedRequest, int, HttpResponseMessage> responder)
     {
         _routes[path] = responder;

@@ -168,7 +168,7 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
             : null;
         var result = new List<OpenFinanceAccountTransactions>();
         var pages = 0;
-        var cardLinesByCreatedAt = 0;
+        int cardLinesByCreatedAt = 0, cardsWithoutCreatedAtRead = 0;
         int billPages = 0, billsUnread = 0;
         foreach (var account in accounts)
         {
@@ -185,10 +185,17 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
             {
                 if (cardCreatedAtFrom is { } createdAtFrom)
                 {
-                    var created = await api.GetTransactionsCreatedFromAsync(credentials, account.Id!, createdAtFrom, cancellationToken).ConfigureAwait(false);
-                    pages += created.Pages;
-                    lines = MergeById(read.Lines, created.Lines, out var added);
-                    cardLinesByCreatedAt += added;
+                    var created = await ReadCreatedFromAsync(credentials, account.Id!, createdAtFrom, cancellationToken).ConfigureAwait(false);
+                    if (created is null)
+                    {
+                        cardsWithoutCreatedAtRead++;
+                    }
+                    else
+                    {
+                        pages += created.Pages;
+                        lines = MergeById(read.Lines, created.Lines, out var added);
+                        cardLinesByCreatedAt += added;
+                    }
                 }
 
                 var billRead = await ReadBillsAsync(credentials, account.Id!, cancellationToken).ConfigureAwait(false);
@@ -213,8 +220,9 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
             if (cardDateFrom is { } cardFrom && result.Any(a => a.Account.Kind == OpenFinanceAccountKind.CreditCard))
             {
                 writer.WriteString("cardTransactionsDateFrom", cardFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
-                writer.WriteString("cardTransactionsCreatedAtFrom", cardCreatedAtFrom!.Value.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture));
+                writer.WriteString("cardTransactionsCreatedAtFrom", PluggyApiClient.FormatCreatedAtFrom(cardCreatedAtFrom!.Value));
                 writer.WriteNumber("cardLinesByCreatedAt", cardLinesByCreatedAt);
+                writer.WriteNumber("cardsWithoutCreatedAtRead", cardsWithoutCreatedAtRead);
             }
             writer.WriteNumber("transactionPages", pages);
             if (result.Any(a => a.Account.Kind == OpenFinanceAccountKind.CreditCard))
@@ -266,6 +274,23 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
         line.ValueKind == JsonValueKind.Object && line.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String
             ? FirstNonEmpty(id.GetString())
             : null;
+
+    /// <summary>
+    /// A card's lines by <c>createdAtFrom</c> (#1426). Best effort, like the bills read: the date read already holds
+    /// what a sync without it would send, so a read that fails (an upstream error, a rate limit) leaves the card with
+    /// the date read's lines (<c>null</c>) instead of failing the sync.
+    /// </summary>
+    private async Task<PluggyTransactionsRead?> ReadCreatedFromAsync(PluggyCredentials credentials, string accountId, DateTimeOffset createdAtFrom, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await api.GetTransactionsCreatedFromAsync(credentials, accountId, createdAtFrom, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OpenFinanceSourceException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// A card's bills from <c>GET /bills?accountId=</c> (#1386). Best effort: a bills read that fails (the product

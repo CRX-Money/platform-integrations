@@ -46,19 +46,15 @@ has exactly one adapter, that adapter runs.
   its suffix (and whose source reports no number and count) is now an installment, so its
   identity gains `|{number}/{count}` and its key changes; its event is dated from its bill.
   A line whose description ends in a `dd/mm/yy` date loses the `|{number}/{count}` it had
-  wrongly been given, so its key changes too, and its event goes back to its booking date.
-  Every other line keeps its key byte for byte. Both cases carry the same aggregator line
-  id, so the host's re-key by line id (#1425, #1428: an incoming event whose key the
-  connection does not hold takes over the item of the same connection, external account
-  and `ExternalId`) re-keys them in place instead of inserting them again; keep that step
-  on. The step applies only to events whose provider data carries `card.installment`, so
-  a trailing-date line, which now has none, is **not** re-keyed by it: such a line comes
-  in as a new item next to the one imported under its old key, and the host should flag
-  the pair (same connection, external account and `ExternalId`, different key) for review
-  rather than post both, or, for this upgrade, also apply the re-key step when the item it
-  would take over carries `card.installment` (its old key was an installment key). The
-  version impact is the one #1424 describes: a change to the idempotency key of some
-  lines, listed here as previews require.
+  wrongly been given, so its key changes too, and the plugin dates its event at its booking
+  date instead of a bill. Every other line keeps its key byte for byte, except a line
+  identical to one of them (same account, instant, direction and amount), which shared
+  its ordinals and can change ordinal, and so key, with it. Both cases keep their
+  aggregator line id, amount, type and asset, so the host's re-key by line id takes the
+  existing item over in place (#1425 for lines that gain `card.installment`, #1428 for
+  those that lose it), keeping its date and movement; keep that step on. The version
+  impact is the one #1424 describes: a change to the idempotency key of some lines,
+  listed here as previews require.
   Code: `OpenFinanceTransactionMapper.Installment` (`InstallmentSuffix`).
 
 - **Cards are also read by creation date, so tail installments reach windowed reads (#1426).**
@@ -74,22 +70,37 @@ has exactly one adapter, that adapter runs.
   are added to the first read's by Pluggy's line id: a line both return is kept once.
   The plugin sends them by its usual test, so a tail installment whose bill is dated in
   the window is sent, dated from its bill, with the key a full read gives it.
+  The second read is best effort, like the bills read: when it fails (an upstream error,
+  a rate limit) the card keeps the first read's lines and the sync does not fail
+  (`sourceDiagnostics.cardsWithoutCreatedAtRead` counts the card).
   Deposit accounts and full-history syncs read as before.
 
-  **Keys and ordinals.** No key recipe changes. The date read still holds every line of
-  each date it covers, and the added lines are dated before it, so they share no line
-  identity with its lines and its ordinals are unchanged. The one exception is a line
-  identical to one in the date read (same account, instant, direction, amount and, for
-  an installment, number and count) but with an older Pluggy `date`, which Open Finance
-  does not produce for one line; it would be numbered with it by line id, as in a full
-  read.
+  **Keys and ordinals.** No key recipe changes, and no key the plugin sends moves. The
+  date read still holds every line of each date it covers, and the added lines have an
+  older Pluggy `date`, so an added line shares a line identity with a date-read line only
+  when both carry the same instant. That happens for an **unrecognised installment** (the
+  source reports no number and count and the description has no suffix the plugin reads)
+  of an equal-amount series: its identity is the purchase instant, direction and amount,
+  like its siblings' that the date read holds under their bill post date. It also happens
+  for a line identical to one in the date read (same account, instant, direction, amount
+  and, for an installment, number and count) but with an older Pluggy `date`, which Open
+  Finance does not produce for one line. The added line is then numbered with them by line
+  id, as in a full read, and their ordinals can move. None of them is sent, though: they
+  share the added line's `transactionTime`, a purchase instant on or before its Pluggy
+  `date` and so before the card's read date and the first date the sync sends, and a line
+  that is not a recognised installment is sent by that date only.
 
-  **Host.** Nothing to change: the added lines are installments the host has not
-  received from a windowed read before (or has from a full read, under the same key),
-  and the re-key by line id (#1425) still applies to them. Diagnostics: `transactionPages`
+  **Host.** Nothing to change. The second read adds the lines whose Pluggy `date` is before
+  the card's read date; of those the plugin sends only the recognised installments whose
+  bill falls in the window, dated from it. The late-detected plain lines and unrecognised
+  installments it adds are dated at their booking date, before the window, and are not
+  sent (a full-history sync sends them, as before). A line it sends is one the host has
+  not received from a windowed read before (or has from a full read, under the same key),
+  and the re-key by line id (#1425) still applies to it. Diagnostics: `transactionPages`
   counts the pages of both reads; new keys after `cardTransactionsDateFrom`:
-  `cardTransactionsCreatedAtFrom` (the instant the second read starts at) and
-  `cardLinesByCreatedAt` (the lines only it returned).
+  `cardTransactionsCreatedAtFrom` (the instant the second read starts at, as the query
+  sends it, `yyyy-mm-ddT00:00:00.000Z`), `cardLinesByCreatedAt` (the lines only it
+  returned) and `cardsWithoutCreatedAtRead` (the cards whose second read failed).
   Code: `PluggyOpenFinanceSource.ReadAsync` and `.MergeById`,
   `PluggyApiClient.GetTransactionsCreatedFromAsync`.
 
@@ -136,14 +147,21 @@ has exactly one adapter, that adapter runs.
 
   **The suffix (since #1430).** When the source reports no number and count, they come
   from the `dd/dd` at the end of the description, read after cutting the location the
-  issuer may append to it. The location is a city name (uppercase `A`-`Z`, words
-  separated by single spaces) followed by the country code `BR`, glued to the city or
-  after spaces, that comes right after the suffix: glued to it (compact,
-  "MERCADO TESTE01/03CIDADE EXEMPLOBR") or after one or more spaces (padded,
-  "LOJA EXEMPLO 03/10      CIDADE EXEMPLO  BR"). Anything else after the suffix means
-  the description has none. The suffix is two ASCII digits, a slash and two ASCII
-  digits, never right after a digit or a slash, so a trailing `dd/mm/yy` date
-  ("COMPRA TESTE 12/05/26", with or without a location after it) is never an installment.
+  issuer may append to it. The location is an optional city name followed by the country
+  code `BR` or `BRA`, glued to the city or after spaces, that comes right after the
+  suffix: glued to it (compact, "MERCADO TESTE01/03CIDADE EXEMPLOBR") or after one or
+  more spaces (padded, "LOJA EXEMPLO 03/10      CIDADE EXEMPLO  BR", or
+  "LOJA EXEMPLO 01/03 BR" with no city). A city is words separated by single spaces,
+  each starting with an uppercase letter and made of uppercase letters (Unicode `\p{Lu}`,
+  so accented ones count: "SÃO EXEMPLO"), dots, apostrophes and hyphens ("S.EXEMPLO",
+  "VILA-EXEMPLO", "PORTO D'EXEMPLO"). A lowercase location is not supported: the line
+  reads as having no suffix. Anything else after the suffix means the description has
+  none. The suffix is two ASCII digits, a slash and two ASCII digits, never right after
+  a digit or a slash, so a trailing `dd/mm/yy` date ("COMPRA TESTE 12/05/26", with or
+  without a location after it) is never an installment. A trailing `dd/mm` date is
+  ambiguous and is not told apart: followed by a location or not, it reads as an
+  installment when the day is at most the month ("COMPRA 05/10 CIDADE EXEMPLO BR" is 5
+  of 10) and as none otherwise (`25/10`).
 
   **A line keeps its key while it reads as the same installment.** The number and
   count come from the source's metadata when it reports both, and only otherwise from
@@ -189,7 +207,9 @@ has exactly one adapter, that adapter runs.
   corrected amount is a new item today and must stay one. For such an event whose key
   the connection does not hold, one item of the same connection and external account
   with the same `ExternalId` (the lowest `Id`) gets the new key, and, if the host
-  re-dates, the new date, instead of a new item being inserted. Pseudo-SQL against
+  re-dates, the new date, instead of a new item being inserted. Since host story #1428
+  the host applies the step to every incoming event with an `ExternalId` whose amount,
+  type and asset match the item it takes over, installment or not. Pseudo-SQL against
   `Integration.ImportItem`, with the host's column names:
 
   ```sql
@@ -591,7 +611,8 @@ accounts needs Pluggy's commercial plan or another aggregator.
   its `date` is the purchase date, so on a windowed sync each card is read a second
   time, by `createdAtFrom` from the card's read date at 00:00:00.000Z
   (`cardTransactionsCreatedAtFrom`), with the same cursor paging, and the lines only
-  that read returns are added by Pluggy's line id (#1426). Pluggy's reference
+  that read returns are added by Pluggy's line id (#1426); that read is best effort, like
+  the bills read (`cardsWithoutCreatedAtRead`). Pluggy's reference
   documents `createdAtFrom` (`yyyy-mm-ddThh:mm:ss.000Z`, lines created at or after it)
   and that it cannot be combined with `dateFrom`
   ([GET /v2/transactions](https://docs.pluggy.ai/reference/transactions-list-by-cursor)).
