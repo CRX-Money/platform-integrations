@@ -347,9 +347,12 @@ public abstract class OpenFinanceIntegrationPlugin
             WritePairCounts(writer, "cardBillPayment", cardPairs.Counts, "cardSideUnpaired");
             writer.WriteEndObject();
             WriteConnector(writer, snapshot.Connector);
-            // After the earlier keys (#1440): sent lines made in a currency other than their account's.
+            // After the earlier keys (#1440): sent lines made in a currency other than their account's, and the pending
+            // ones without the account's amount, whose original amount a card's pendingAmount then holds.
             writer.WriteNumber("foreignLines", foreignLines);
             writer.WriteNumber("foreignLinesWithoutAccountAmount", foreignLinesWithoutAccountAmount);
+            writer.WriteNumber("pendingForeignLinesWithoutAccountAmount", snapshot.Accounts
+                .Sum(a => a.Transactions.Count(t => t.IsPending && t.Foreign is { AccountAmountMissing: true })));
             WriteRaw(writer, "sourceDiagnostics", snapshot.DiagnosticsJson);
         });
 

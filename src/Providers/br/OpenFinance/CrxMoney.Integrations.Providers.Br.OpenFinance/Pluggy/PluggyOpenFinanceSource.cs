@@ -692,17 +692,21 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
     /// differs from the account's, <c>amountInAccountCurrency</c> ("Transaction amount in Account's Currency",
     /// <see href="https://docs.pluggy.ai/reference/transactions-retrieve">GET /transactions/{id}</see>, the transaction
     /// object). An international purchase on a BRL card is USD in <c>amount</c> and what the card was charged in
-    /// <c>amountInAccountCurrency</c>. Generic: a deposit line in another currency follows the same rule. A foreign line
-    /// without <c>amountInAccountCurrency</c> keeps <c>amount</c> and is flagged
+    /// <c>amountInAccountCurrency</c>. Generic: a deposit line in another currency follows the same rule. A line is
+    /// foreign only when its <c>currencyCode</c>, trimmed and upper-cased, is a three-letter ISO 4217 code
+    /// (<c>^[A-Z]{3}$</c>) other than the account's: a missing or non-ISO code ("R$", "986") is the account's currency,
+    /// and a line with <c>amountInAccountCurrency</c> but no <c>currencyCode</c> keeps <c>amount</c>. A foreign line
+    /// without <c>amountInAccountCurrency</c>, or with 0 there, keeps <c>amount</c> and is flagged
     /// (<see cref="OpenFinanceForeignAmount.AccountAmountMissing"/>); no rate is guessed.
     /// </summary>
     internal static (decimal Amount, OpenFinanceForeignAmount? Foreign) AccountCurrencyAmount(OpenFinanceAccount account, PluggyTransaction transaction, decimal amount)
     {
         var currency = FirstNonEmpty(transaction.CurrencyCode)?.ToUpperInvariant();
-        if (currency is null || string.Equals(currency, account.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+        if (currency is not { Length: 3 } || !currency.All(char.IsAsciiLetterUpper)
+            || string.Equals(currency, account.CurrencyCode, StringComparison.OrdinalIgnoreCase))
             return (amount, null);
 
-        return transaction.AmountInAccountCurrency is { } inAccountCurrency
+        return transaction.AmountInAccountCurrency is { } inAccountCurrency && inAccountCurrency != 0m
             ? (Math.Abs(inAccountCurrency), new OpenFinanceForeignAmount(currency, amount))
             : (amount, new OpenFinanceForeignAmount(currency, amount) { AccountAmountMissing = true });
     }

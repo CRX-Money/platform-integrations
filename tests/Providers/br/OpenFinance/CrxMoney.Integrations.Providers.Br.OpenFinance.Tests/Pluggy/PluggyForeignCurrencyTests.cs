@@ -10,8 +10,8 @@ namespace CrxMoney.Integrations.Providers.Br.OpenFinance.Tests.Pluggy;
 /// <summary>
 /// Lines made in a currency other than the account's (#1440): Pluggy's <c>amount</c> is in the line's
 /// <c>currencyCode</c> and <c>amountInAccountCurrency</c> is what the account was charged or credited. The event carries
-/// the account's amount and asset, its key is built from that amount, and the original goes in <c>foreign</c>. Every
-/// line is synthetic.
+/// the account's amount and asset, the original goes in <c>foreign</c>, and the key keeps the original amount, as
+/// before, so no key changes. Every line is synthetic.
 /// </summary>
 public sealed class PluggyForeignCurrencyTests
 {
@@ -24,7 +24,8 @@ public sealed class PluggyForeignCurrencyTests
     private static readonly OpenFinanceAccount BrlCard = new("card", OpenFinanceAccountKind.CreditCard, null, "077", "1234", "BRL", null);
 
     /// <summary>A Pluggy card line; <paramref name="extra"/> adds <c>currencyCode</c>, <c>amountInAccountCurrency</c> and the like.</summary>
-    private static JsonObject CardLine(string suffix, string time, string amount, string extra, string status = "POSTED") =>
+    private static JsonObject CardLine(string suffix, string time, string amount, string extra, string status = "POSTED", string type = "DEBIT",
+        string paymentType = "\"paymentType\": \"SINGLE\"") =>
         JsonNode.Parse($$"""
             {
               "id": "00000000-0000-4000-8000-000000000{{suffix}}",
@@ -34,7 +35,7 @@ public sealed class PluggyForeignCurrencyTests
               "descriptionRaw": "LOJA EXTERIOR TESTE",
               "amount": {{amount}},
               {{extra}}
-              "type": "DEBIT",
+              "type": "{{type}}",
               "status": "{{status}}",
               "operationType": null,
               "paymentData": null,
@@ -42,7 +43,7 @@ public sealed class PluggyForeignCurrencyTests
               "creditCardMetadata": {
                 "cardNumber": "1234",
                 "billId": "{{BillId}}",
-                "paymentType": "SINGLE",
+                {{paymentType}},
                 "transactionDateTime": "{{time}}"
               }
             }
@@ -95,16 +96,107 @@ public sealed class PluggyForeignCurrencyTests
     }
 
     [Fact]
-    public async Task A_foreign_lines_key_uses_the_amount_in_the_accounts_currency()
+    public async Task A_foreign_lines_key_keeps_the_original_amount()
     {
         var result = await SyncAsync(Lines());
 
+        // What preview.10 hashed: the converted amount can be filled in or revised later without moving the key.
         Assert.Equal(
-            OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2026-09-20T14:30:00Z|D|55.20", 0),
-            Event(result, "f01").IdempotencyKey);
-        Assert.NotEqual(
             OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2026-09-20T14:30:00Z|D|10.00", 0),
             Event(result, "f01").IdempotencyKey);
+        Assert.NotEqual(
+            OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2026-09-20T14:30:00Z|D|55.20", 0),
+            Event(result, "f01").IdempotencyKey);
+    }
+
+    [Fact]
+    public async Task A_converted_amount_filled_in_or_revised_later_arrives_under_the_same_key()
+    {
+        var first = Event(await SyncAsync([CardLine("f01", "2026-09-20T14:30:00.000Z", "10.00", "\"currencyCode\": \"USD\",")]), "f01");
+        var filled = Event(await SyncAsync([CardLine("f01", "2026-09-20T14:30:00.000Z", "10.00", "\"currencyCode\": \"USD\", \"amountInAccountCurrency\": 55.20,")]), "f01");
+        var revised = Event(await SyncAsync([CardLine("f01", "2026-09-20T14:30:00.000Z", "10.00", "\"currencyCode\": \"USD\", \"amountInAccountCurrency\": 54.90,")]), "f01");
+
+        Assert.Equal([10.00m, 55.20m, 54.90m], new[] { first.Amount, filled.Amount, revised.Amount });
+        Assert.Equal(first.IdempotencyKey, filled.IdempotencyKey);
+        Assert.Equal(first.IdempotencyKey, revised.IdempotencyKey);
+    }
+
+    [Fact]
+    public async Task A_card_refund_abroad_is_a_credit_in_the_accounts_currency()
+    {
+        var result = await SyncAsync([CardLine("f09", "2026-09-26T16:20:00.000Z", "-4.00", "\"currencyCode\": \"USD\", \"amountInAccountCurrency\": -22.08,", type: "CREDIT")]);
+
+        var e = Event(result, "f09");
+        Assert.Equal(OpenFinanceTransactionMapper.DepositType, e.Type);
+        Assert.Equal(22.08m, e.Amount);
+        Assert.Equal("BRL", e.AssetCode);
+        Assert.Equal(4.00m, Data(e)["foreign"]!["amount"]!.GetValue<decimal>());
+        Assert.Equal(
+            OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2026-09-26T16:20:00Z|C|4.00", 0),
+            e.IdempotencyKey);
+    }
+
+    [Fact]
+    public async Task A_zero_amount_in_the_accounts_currency_counts_as_missing()
+    {
+        var result = await SyncAsync([CardLine("f10", "2026-09-27T08:00:00.000Z", "6.00", "\"currencyCode\": \"USD\", \"amountInAccountCurrency\": 0,")]);
+
+        var e = Event(result, "f10");
+        Assert.Equal(6.00m, e.Amount); // never a 0 event
+        Assert.True(Data(e)["foreign"]!["accountAmountMissing"]!.GetValue<bool>());
+        Assert.Equal(1, Diagnostics(result)["foreignLinesWithoutAccountAmount"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task Two_identical_foreign_purchases_in_one_second_are_numbered_by_their_original_amount()
+    {
+        var result = await SyncAsync(
+        [
+            CardLine("f11", "2026-09-28T13:00:00.000Z", "3.00", "\"currencyCode\": \"USD\", \"amountInAccountCurrency\": 16.50,"),
+            CardLine("f12", "2026-09-28T13:00:00.000Z", "3.00", "\"currencyCode\": \"USD\", \"amountInAccountCurrency\": 16.62,"),
+        ]);
+
+        const string identity = $"{CardAccountKey}|2026-09-28T13:00:00Z|D|3.00";
+        Assert.Equal(16.50m, Event(result, "f11").Amount);
+        Assert.Equal(16.62m, Event(result, "f12").Amount);
+        Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey(identity, 0), Event(result, "f11").IdempotencyKey);
+        Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey(identity, 1), Event(result, "f12").IdempotencyKey);
+    }
+
+    [Fact]
+    public async Task Amounts_with_more_than_two_decimals_are_kept_and_the_identity_rounds_as_before()
+    {
+        var result = await SyncAsync([CardLine("f13", "2026-09-29T10:30:00.000Z", "9.999", "\"currencyCode\": \"USD\", \"amountInAccountCurrency\": 55.1234,")]);
+
+        var e = Event(result, "f13");
+        Assert.Equal(55.1234m, e.Amount);
+        Assert.Equal(9.999m, Data(e)["foreign"]!["amount"]!.GetValue<decimal>());
+        Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2026-09-29T10:30:00Z|D|10.00", 0), e.IdempotencyKey);
+    }
+
+    [Fact]
+    public async Task A_foreign_installment_leaves_out_the_purchase_total()
+    {
+        var result = await SyncAsync([CardLine("f14", "2026-09-30T15:00:00.000Z", "10.00", "\"currencyCode\": \"USD\", \"amountInAccountCurrency\": 55.20,",
+            paymentType: "\"paymentType\": \"INSTALLMENT\", \"installmentNumber\": 1, \"totalInstallments\": 3, \"totalAmount\": 30.00")]);
+
+        var installment = Data(Event(result, "f14"))["card"]!["installment"]!;
+        Assert.Equal(3, installment["count"]!.GetValue<int>());
+        Assert.Null(installment["totalAmount"]); // its currency is not documented
+    }
+
+    [Fact]
+    public async Task Pending_foreign_lines_without_the_accounts_amount_are_counted()
+    {
+        var result = await SyncAsync(
+        [
+            CardLine("f15", "2026-10-12T11:00:00.000Z", "2.00", "\"currencyCode\": \"GBP\",", status: "PENDING"),
+            CardLine("f16", "2026-10-12T12:00:00.000Z", "5.00", "\"currencyCode\": \"USD\", \"amountInAccountCurrency\": 27.60,", status: "PENDING"),
+        ]);
+
+        var diagnostics = Diagnostics(result);
+        Assert.Equal(1, diagnostics["pendingForeignLinesWithoutAccountAmount"]!.GetValue<int>());
+        Assert.Equal(0, diagnostics["foreignLines"]!.GetValue<int>());
     }
 
     [Fact]
@@ -150,6 +242,7 @@ public sealed class PluggyForeignCurrencyTests
 
         Assert.Equal(0, Diagnostics(result)["foreignLines"]!.GetValue<int>());
         Assert.Equal(0, Diagnostics(result)["foreignLinesWithoutAccountAmount"]!.GetValue<int>());
+        Assert.Equal(0, Diagnostics(result)["pendingForeignLinesWithoutAccountAmount"]!.GetValue<int>());
     }
 
     [Fact]
@@ -193,18 +286,23 @@ public sealed class PluggyForeignCurrencyTests
         Assert.Equal("EUR", Data(e)["foreign"]!["currencyCode"]!.GetValue<string>());
         Assert.Equal(200m, Data(e)["foreign"]!["amount"]!.GetValue<decimal>());
         Assert.Equal(
-            OpenFinanceTransactionMapper.IdempotencyKey($"{BankAccountKey}|2026-09-25T12:00:00Z|C|1234.56", 0),
+            OpenFinanceTransactionMapper.IdempotencyKey($"{BankAccountKey}|2026-09-25T12:00:00Z|C|200.00", 0),
             e.IdempotencyKey);
         Assert.Equal(3, Diagnostics(result)["foreignLines"]!.GetValue<int>());
     }
 
     [Theory]
-    [InlineData(null, null, 10.00, null)]                 // no currency: the account's
-    [InlineData("BRL", 99.99, 10.00, null)]               // the account's currency: amountInAccountCurrency ignored
-    [InlineData(" brl ", null, 10.00, null)]              // compared without case or spaces
-    [InlineData("usd", -55.20, 55.20, "USD")]             // negative amounts are made positive, the code upper case
-    [InlineData("USD", null, 10.00, "USD")]               // missing: the original amount, flagged
-    public void The_amount_in_the_accounts_currency_is_chosen_by_the_lines_currency(string? currency, double? inAccount, double expected, string? foreignCurrency)
+    [InlineData(null, null, 10.00, null, false)]          // no currency: the account's
+    [InlineData(null, 55.20, 10.00, null, false)]         // amountInAccountCurrency without currencyCode: unchanged
+    [InlineData("BRL", 99.99, 10.00, null, false)]        // the account's currency: amountInAccountCurrency ignored
+    [InlineData(" brl ", null, 10.00, null, false)]       // compared without case or spaces
+    [InlineData("R$", 55.20, 10.00, null, false)]         // not an ISO code: the account's currency
+    [InlineData("986", 55.20, 10.00, null, false)]        // a numeric ISO code is not read
+    [InlineData("USDT", 55.20, 10.00, null, false)]       // four letters: not an ISO code
+    [InlineData("usd", -55.20, 55.20, "USD", false)]      // negative amounts are made positive, the code upper case
+    [InlineData("USD", null, 10.00, "USD", true)]         // missing: the original amount, flagged
+    [InlineData("USD", 0.0, 10.00, "USD", true)]          // zero counts as missing: never a 0 event
+    public void The_amount_in_the_accounts_currency_is_chosen_by_the_lines_currency(string? currency, double? inAccount, double expected, string? foreignCurrency, bool missing)
     {
         var transaction = new PluggyTransaction("t", null, null, null, -10.00m, "DEBIT", "POSTED", null, null, null, null, null,
             CurrencyCode: currency, AmountInAccountCurrency: inAccount is { } value ? (decimal)value : null);
@@ -216,7 +314,7 @@ public sealed class PluggyForeignCurrencyTests
         if (foreign is not null)
         {
             Assert.Equal(10.00m, foreign.Amount);
-            Assert.Equal(inAccount is null, foreign.AccountAmountMissing);
+            Assert.Equal(missing, foreign.AccountAmountMissing);
         }
     }
 
@@ -246,6 +344,6 @@ public sealed class PluggyForeignCurrencyTests
         Assert.Equal(55.20m, e.Amount);
         Assert.Equal("USD", Data(e)["foreign"]!["currencyCode"]!.GetValue<string>());
         Assert.Null(Data(e)["foreign"]!["accountAmountMissing"]);
-        Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2026-09-20T14:30:00Z|D|55.20", 0), e.IdempotencyKey);
+        Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2026-09-20T14:30:00Z|D|10.00", 0), e.IdempotencyKey);
     }
 }

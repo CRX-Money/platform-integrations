@@ -150,7 +150,9 @@ public sealed record OpenFinanceTransaction(
     /// On a line made in a currency other than the account's (an international card purchase, #1440): the original
     /// currency and amount. <see cref="Amount"/> is still the amount in the account's currency, unless
     /// <see cref="OpenFinanceForeignAmount.AccountAmountMissing"/> says the source did not report it. Null on a line in
-    /// the account's currency. It never takes part in the idempotency key.
+    /// the account's currency. Its <see cref="OpenFinanceForeignAmount.Amount"/>, not <see cref="Amount"/>, is the amount
+    /// in the line identity (<see cref="OpenFinanceTransactionMapper.LineIdentity"/>), so a converted amount filled in or
+    /// revised later does not change the key.
     /// </summary>
     public OpenFinanceForeignAmount? Foreign { get; init; }
 }
