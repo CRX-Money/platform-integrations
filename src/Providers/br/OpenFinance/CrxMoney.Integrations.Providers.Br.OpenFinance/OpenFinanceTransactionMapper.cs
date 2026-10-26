@@ -39,7 +39,11 @@ public static partial class OpenFinanceTransactionMapper
     /// data and the bill dates are deliberately left out: aggregators enrich counterparties after the fact and report
     /// them unevenly, and a bill post date can still be Open Finance's placeholder on a posted line, so either would
     /// change keys. Lines that are still identical (two identical purchases in the same second) are told apart by an
-    /// ordinal (see <see cref="IdempotencyKey"/>).
+    /// ordinal (see <see cref="IdempotencyKey"/>). On a line made in another currency
+    /// (<see cref="OpenFinanceTransaction.Foreign"/>) the amount is the <b>original</b> one, as up to preview.10, not the
+    /// event's amount in the account's currency (#1440): the original is stable, while the converted amount can be
+    /// missing at first and filled later, or revised when the issuer converts at the bill's closing rate, and either
+    /// would change the key.
     /// </summary>
     public static string LineIdentity(OpenFinanceAccount account, OpenFinanceTransaction transaction)
     {
@@ -47,7 +51,7 @@ public static partial class OpenFinanceTransactionMapper
             account.ExternalAccountId,
             transaction.TransactionTime.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
             transaction.Direction == OpenFinanceDirection.Credit ? "C" : "D",
-            transaction.Amount.ToString("0.00", CultureInfo.InvariantCulture));
+            (transaction.Foreign?.Amount ?? transaction.Amount).ToString("0.00", CultureInfo.InvariantCulture));
         return Installment(account, transaction) is { } installment
             ? string.Create(CultureInfo.InvariantCulture, $"{identity}|{installment.Number}/{installment.Count}")
             : identity;
@@ -414,6 +418,17 @@ public static partial class OpenFinanceTransactionMapper
                 writer.WriteEndObject();
             }
 
+            if (transaction.Foreign is { } foreign)
+            {
+                // After the earlier keys (#1440): the original currency and amount; the event's amount is the account's.
+                writer.WriteStartObject("foreign");
+                writer.WriteString("currencyCode", foreign.CurrencyCode);
+                writer.WriteNumber("amount", foreign.Amount);
+                if (foreign.AccountAmountMissing)
+                    writer.WriteBoolean("accountAmountMissing", true);
+                writer.WriteEndObject();
+            }
+
             if (transaction.SourcePayload.ValueKind is JsonValueKind.Object)
             {
                 writer.WritePropertyName("sourcePayload");
@@ -446,7 +461,8 @@ public static partial class OpenFinanceTransactionMapper
         writer.WriteNumber("number", installment.Number);
         writer.WriteNumber("count", installment.Count);
         writer.WriteString("purchaseDate", IsoDate(installment.PurchaseDate));
-        if (installment.TotalAmount is { } total)
+        // On a line in another currency the total's currency is not documented, so it is left out (#1440).
+        if (installment.TotalAmount is { } total && transaction.Foreign is null)
             writer.WriteNumber("totalAmount", total);
         writer.WriteString("source", installment.Source == OpenFinanceInstallmentSource.Metadata ? "metadata" : "description");
         WriteOptional(writer, "dateSource", dateSource);
@@ -558,7 +574,7 @@ public static class OpenFinanceImportSchemas
                     "number": { "type": "integer", "minimum": 1 },
                     "count": { "type": "integer", "minimum": 2 },
                     "purchaseDate": { "type": "string", "format": "date", "description": "The purchase date the source reports, else the line's transactionDate" },
-                    "totalAmount": { "type": "number", "description": "The whole purchase's amount, when the source reports it (direct connectors only); never a second movement" },
+                    "totalAmount": { "type": "number", "description": "The whole purchase's amount, when the source reports it (direct connectors only); never a second movement. Absent on a line in another currency (see foreign), whose total has no documented currency" },
                     "source": { "enum": ["metadata", "description"], "description": "The source's installment fields, or the trailing dd/dd of the description" },
                     "dateSource": { "enum": ["billPostDate", "bill", "billForecastDate", "purchase"], "description": "What the event's date came from: billPostDate, the named bill's closing date (else its due date), the first day of billForecastDate's month, or the line's own date when none of them is later than purchaseDate" }
                   }
@@ -591,6 +607,16 @@ public static class OpenFinanceImportSchemas
               }
             },
             "pix": { "type": "object", "properties": { "endToEndId": { "type": "string" }, "txId": { "type": "string" }, "key": { "type": "string" } } },
+            "foreign": {
+              "type": "object",
+              "description": "On a line made in a currency other than the account's (an international card purchase): the original currency and amount. The event's amount and asset are the account's: what the account was charged or credited",
+              "required": ["currencyCode", "amount"],
+              "properties": {
+                "currencyCode": { "type": "string", "pattern": "^[A-Z]{3}$", "description": "ISO 4217 code of the original currency" },
+                "amount": { "type": "number", "minimum": 0, "description": "The original amount, positive, in currencyCode" },
+                "accountAmountMissing": { "const": true, "description": "Present when the source did not report the amount in the account's currency: the event's amount is then the original amount, not converted (no rate is guessed)" }
+              }
+            },
             "sourcePayload": { "description": "The aggregator's raw line, verbatim" }
           }
         }

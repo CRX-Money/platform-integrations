@@ -273,8 +273,17 @@ public abstract class OpenFinanceIntegrationPlugin
 
         var events = new List<IntegrationImportEvent>();
         var sentPerAccount = new Dictionary<string, int>(StringComparer.Ordinal);
+        int foreignLines = 0, foreignLinesWithoutAccountAmount = 0;
         foreach (var line in lines.Where(l => l.IsSent))
         {
+            // Lines made in another currency (#1440); without the account's amount they carry the original one.
+            if (line.Transaction.Foreign is { } foreign)
+            {
+                foreignLines++;
+                if (foreign.AccountAmountMissing)
+                    foreignLinesWithoutAccountAmount++;
+            }
+
             var links = Links(line.Key);
             if (BillOf(line.Account, line.Transaction) is { } bill)
                 links = (links ?? new OpenFinanceLineLinks()) with { Bill = bill };
@@ -338,6 +347,12 @@ public abstract class OpenFinanceIntegrationPlugin
             WritePairCounts(writer, "cardBillPayment", cardPairs.Counts, "cardSideUnpaired");
             writer.WriteEndObject();
             WriteConnector(writer, snapshot.Connector);
+            // After the earlier keys (#1440): sent lines made in a currency other than their account's, and the pending
+            // ones without the account's amount, whose original amount a card's pendingAmount then holds.
+            writer.WriteNumber("foreignLines", foreignLines);
+            writer.WriteNumber("foreignLinesWithoutAccountAmount", foreignLinesWithoutAccountAmount);
+            writer.WriteNumber("pendingForeignLinesWithoutAccountAmount", snapshot.Accounts
+                .Sum(a => a.Transactions.Count(t => t.IsPending && t.Foreign is { AccountAmountMissing: true })));
             WriteRaw(writer, "sourceDiagnostics", snapshot.DiagnosticsJson);
         });
 
