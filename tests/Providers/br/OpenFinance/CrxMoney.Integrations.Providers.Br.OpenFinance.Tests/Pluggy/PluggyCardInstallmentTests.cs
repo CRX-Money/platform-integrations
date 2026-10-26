@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CrxMoney.Integrations.Abstractions.Sync;
@@ -181,6 +182,45 @@ public sealed class PluggyCardInstallmentTests
         Assert.Equal("description", Text(installment["source"]));
         Assert.Equal("billPostDate", Text(installment["dateSource"]));
         Assert.Equal(eventDate, Date(e));
+    }
+
+    /// <summary>
+    /// #1430: the issuer's location after the suffix is cut before the suffix is read, in both shapes, so the line gets
+    /// its installment, its identity and its bill date like any other suffix.
+    /// </summary>
+    [Theory]
+    [InlineData("f13", 1, 3, "2026-09-19", "2026-09-21", "63.20")]   // "MERCADO TESTE01/03CIDADE EXEMPLOBR": compact
+    [InlineData("f14", 3, 10, "2026-07-08", "2026-09-22", "129.90")] // "LOJA EXEMPLO MODA 03/10      CIDADE EXEMPLO  BR": padded
+    public async Task A_location_after_the_suffix_is_cut_before_the_suffix_is_read(string id, int number, int count, string purchaseDate, string eventDate, string amount)
+    {
+        var e = (await CardEventsAsync(InstallmentLines()))[id];
+        var installment = Card(e)["installment"]!;
+
+        Assert.Equal(number, installment["number"]!.GetValue<int>());
+        Assert.Equal(count, installment["count"]!.GetValue<int>());
+        Assert.Equal(purchaseDate, Text(installment["purchaseDate"]));
+        Assert.Equal("description", Text(installment["source"]));
+        Assert.Equal("billPostDate", Text(installment["dateSource"]));
+        Assert.Equal(eventDate, Date(e));
+
+        // The installment identity: the number and count join the line identity.
+        var time = DateTimeOffset.Parse(Text(JsonNode.Parse(e.ProviderData!)!["transactionTime"])!, CultureInfo.InvariantCulture).ToUniversalTime();
+        Assert.Equal(
+            OpenFinanceTransactionMapper.IdempotencyKey(
+                string.Create(CultureInfo.InvariantCulture, $"{CardAccountKey}|{time:yyyy-MM-dd'T'HH:mm:ss'Z'}|D|{amount}|{number}/{count}"), 0),
+            e.IdempotencyKey);
+    }
+
+    /// <summary>#1430: a trailing <c>dd/mm/yy</c> date is never an installment, with or without a location after it.</summary>
+    [Theory]
+    [InlineData("f15")] // "COMPRA TESTE 12/05/26"
+    [InlineData("f16")] // "COMPRA TESTE 03/04/26    CIDADE EXEMPLO BR"
+    public async Task A_trailing_date_is_never_an_installment(string id)
+    {
+        var e = (await CardEventsAsync(InstallmentLines()))[id];
+
+        Assert.Null(Card(e)["installment"]);
+        Assert.Equal(Text(JsonNode.Parse(e.ProviderData!)!["transactionDate"]), Date(e)); // dated at its booking date
     }
 
     [Theory]
@@ -406,24 +446,138 @@ public sealed class PluggyCardInstallmentTests
     }
 
     /// <summary>
-    /// A remaining gap after #1424, pinned: the tail of a long series keeps the purchase date as Pluggy's <c>date</c>
-    /// (its bill post date equals the purchase date), and Pluggy's <c>dateFrom</c> filters on <c>date</c>, so an
-    /// incremental read does not receive the line at all. A full read imports it, dated from its bill.
+    /// The gap #1424 left, closed by #1426: the tail of a long series keeps the purchase date as Pluggy's <c>date</c>
+    /// (its bill post date equals the purchase date), and Pluggy's <c>dateFrom</c> filters on <c>date</c>, so the date
+    /// read of an incremental sync does not hold the line. Cards are also read by <c>createdAtFrom</c> from the same
+    /// date, which holds it (Pluggy stored it when its bill opened), so the windowed read sends it, dated from its bill,
+    /// with the key a full read gives it.
     /// </summary>
     [Fact]
-    public async Task A_tail_installment_whose_pluggy_date_is_the_purchase_date_is_not_read_incrementally()
+    public async Task A_tail_installment_whose_pluggy_date_is_the_purchase_date_is_read_incrementally_by_its_creation_date()
     {
         var line = TailLine(11);
         line["creditCardMetadata"]!["billId"] = "00000000-0000-4000-8000-0000000000e1"; // the bill due 2026-10-10
+        line["createdAt"] = "2026-09-11T06:00:00.000Z";
+        var windowStart = new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.Zero);
 
-        var incremental = await SyncAsync(new JsonArray(line.DeepClone()), windowStart: new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.Zero));
+        var incremental = await SyncAsync(new JsonArray(line.DeepClone()), windowStart);
         var row = JsonNode.Parse(incremental.ProviderDiagnosticsJson!)!["accounts"]!.AsArray()
             .Single(a => Text(a!["externalAccountId"]) == CardAccountKey)!;
-        Assert.Equal(0, row["posted"]!.GetValue<int>());
+        Assert.Equal(1, row["posted"]!.GetValue<int>());
+        Assert.Equal(1, row["sent"]!.GetValue<int>());
+        var source = JsonNode.Parse(incremental.ProviderDiagnosticsJson!)!["sourceDiagnostics"]!;
+        Assert.Equal(1, source["cardLinesByCreatedAt"]!.GetValue<int>());
 
         var full = CardEvents(await SyncAsync(new JsonArray(line.DeepClone())));
-        Assert.Equal("2026-10-10", Date(full["a11"]));
+        var sent = CardEvents(incremental)["a11"];
+        Assert.Equal(full["a11"].IdempotencyKey, sent.IdempotencyKey);
+        Assert.Equal("2026-10-10", Date(sent));
+        Assert.Equal("bill", Text(Card(sent)["installment"]!["dateSource"]));
+
+        // Stored before the card's read date (62 days before today): no read holds it, as before #1426.
+        line["createdAt"] = "2026-08-01T06:00:00.000Z";
+        var stale = await SyncAsync(new JsonArray(line.DeepClone()), windowStart);
+        Assert.Empty(CardEvents(stale));
     }
+
+    /// <summary>
+    /// #1426: the <c>createdAtFrom</c> read is best effort, like the bills read. When it fails the card keeps the date
+    /// read's lines, keyed as without it, the sync succeeds and <c>cardsWithoutCreatedAtRead</c> counts the card.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.NotFound)]
+    // A 5xx or 429 is retried by the HTTP pipeline before it fails; the test host's fake clock would hold the backoff forever.
+    public async Task A_created_at_read_that_fails_leaves_the_card_with_the_date_reads_lines_and_the_sync_succeeds(HttpStatusCode status)
+    {
+        var lines = InstallmentLines();
+        var tail = TailLine(11);
+        tail["createdAt"] = "2026-10-13T06:00:00.000Z";
+        tail["creditCardMetadata"]!["billId"] = "00000000-0000-4000-8000-0000000000e1";
+        lines.Add(tail);
+        var windowStart = new DateTimeOffset(2026, 9, 25, 12, 0, 0, TimeSpan.Zero);
+        var baseline = CardEvents(await SyncAsync(InstallmentLines(), windowStart));
+
+        var server = FakePluggyServer.WithFixtures();
+        server.CardLines = lines;
+        var transactions = server.Responder("/v2/transactions");
+        server.On("/v2/transactions", (request, call) =>
+            request.Query("createdAtFrom") is not null ? FakePluggyServer.Status(status) : transactions(request, call));
+        using var host = new PluggyTestHost(server);
+        var result = await host.Plugin.SyncAsync(PluggyTestHost.Request(windowStart: windowStart), Ct);
+
+        Assert.Equal(IntegrationSyncStatus.Succeeded, result.Status);
+        Assert.Contains(server.TransactionRequests(FakePluggyServer.CardAccountId), r => r.Query("createdAtFrom") is not null);
+        var events = CardEvents(result);
+        Assert.Equal(baseline.Keys.Order(StringComparer.Ordinal), events.Keys.Order(StringComparer.Ordinal)); // no tail line
+        foreach (var (id, e) in baseline)
+            Assert.Equal(e.IdempotencyKey, events[id].IdempotencyKey);
+        var source = JsonNode.Parse(result.ProviderDiagnosticsJson!)!["sourceDiagnostics"]!;
+        Assert.Equal(1, source["cardsWithoutCreatedAtRead"]!.GetValue<int>());
+        Assert.Equal(0, source["cardLinesByCreatedAt"]!.GetValue<int>());
+        Assert.Equal("2026-08-13T00:00:00.000Z", Text(source["cardTransactionsCreatedAtFrom"]));
+    }
+
+    /// <summary>
+    /// #1426: a card line both reads return (its <c>date</c> in the window and stored in it) is imported once, with the
+    /// key it has without the second read; both reads are paged by their own cursor and counted in <c>transactionPages</c>.
+    /// </summary>
+    [Fact]
+    public async Task A_line_both_card_reads_return_is_imported_once_and_both_reads_are_paged()
+    {
+        var lines = InstallmentLines();
+        foreach (var line in lines)
+            line!["createdAt"] = "2026-10-13T06:00:00.000Z";
+        var tail = TailLine(11); // f06 is 10/12 of the same series
+        tail["createdAt"] = "2026-10-13T06:00:00.000Z";
+        tail["creditCardMetadata"]!["billId"] = "00000000-0000-4000-8000-0000000000e1";
+        lines.Add(tail);
+        // Sent from 2026-09-18; the card is read from 2026-08-13 (62 days before today), by date and by createdAt.
+        var windowStart = new DateTimeOffset(2026, 9, 25, 12, 0, 0, TimeSpan.Zero);
+
+        var server = FakePluggyServer.WithFixtures();
+        server.CardLines = lines;
+        server.TransactionPageSize = 3;
+        using var host = new PluggyTestHost(server);
+        var result = await host.Plugin.SyncAsync(PluggyTestHost.Request(windowStart: windowStart), Ct);
+        Assert.Equal(IntegrationSyncStatus.Succeeded, result.Status);
+        // The same lines without createdAt: only the date read holds any of them.
+        var baseline = CardEvents(await SyncAsync(InstallmentLines(), windowStart));
+
+        var events = result.ImportEvents.Where(e => e.ExternalAccountId == CardAccountKey).ToList();
+        Assert.Equal(events.Count, events.Select(e => e.ExternalId).Distinct().Count()); // no line twice
+        Assert.Equal(events.Count, events.Select(e => e.IdempotencyKey).Distinct().Count());
+        // Every line the date read sends is sent as before, with the same key. Added: the tail installments only the
+        // createdAt read holds whose bill is in the window (09/12 and 11/12 of the series, both on the bill due 2026-10-10).
+        Assert.Equal(["f06", "f13", "f14", "f15", "f16"], baseline.Keys.Order(StringComparer.Ordinal));
+        var byId = events.ToDictionary(e => e.ExternalId[^3..], StringComparer.Ordinal);
+        foreach (var (id, e) in baseline)
+            Assert.Equal(e.IdempotencyKey, byId[id].IdempotencyKey);
+        Assert.Equal(["a11", "f06", "f11", "f13", "f14", "f15", "f16"], byId.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal("2026-10-10", Date(byId["a11"]));
+        Assert.Equal("2026-10-10", Date(byId["f11"]));
+
+        // The createdAt read pages with its own cursor and window: every line, three a page.
+        var cardRequests = server.TransactionRequests(FakePluggyServer.CardAccountId);
+        var createdAtPages = cardRequests.Where(r => r.Query("createdAtFrom") is not null).ToList();
+        Assert.Equal((lines.Count + 2) / 3, createdAtPages.Count);
+        Assert.All(createdAtPages, r => Assert.Null(r.Query("dateFrom")));
+        Assert.Null(createdAtPages[0].Query("after"));
+        Assert.All(createdAtPages.Skip(1), r => Assert.NotNull(r.Query("after")));
+        var dateReadLines = DateReadLines(lines, new DateOnly(2026, 8, 13));
+        Assert.Equal((dateReadLines + 2) / 3, cardRequests.Count(r => r.Query("createdAtFrom") is null));
+        var source = JsonNode.Parse(result.ProviderDiagnosticsJson!)!["sourceDiagnostics"]!;
+        Assert.Equal(server.RequestsTo("/v2/transactions").Count, source["transactionPages"]!.GetValue<int>());
+        Assert.Equal(lines.Count - dateReadLines, source["cardLinesByCreatedAt"]!.GetValue<int>());
+        Assert.Equal(0, source["cardsWithoutCreatedAtRead"]!.GetValue<int>());
+        // The diagnostics carry the instant as the query sends it.
+        Assert.Equal(createdAtPages[0].Query("createdAtFrom"), Text(source["cardTransactionsCreatedAtFrom"]));
+    }
+
+    /// <summary>How many of <paramref name="lines"/> a date read from <paramref name="from"/> returns (on Pluggy's UTC <c>date</c>).</summary>
+    private static int DateReadLines(JsonArray lines, DateOnly from) =>
+        lines.Count(l => DateOnly.FromDateTime(DateTimeOffset.Parse(Text(l!["date"])!, CultureInfo.InvariantCulture).UtcDateTime) >= from);
 
     [Theory]
     [InlineData("INSTALLMENT", 1, 6, null, true)]
@@ -441,6 +595,37 @@ public sealed class PluggyCardInstallmentTests
     [InlineData(null, null, null, "LOJA EXEMPLO 00/02", false)]
     [InlineData(null, null, null, "LOJA EXEMPLO ١٢/١٣", false)] // Arabic-Indic digits are not [0-9]
     [InlineData(null, null, null, "LOJA EXEMPLO", false)]
+    // #1430: a location after the suffix is cut first, compact or padded.
+    [InlineData(null, null, null, "MERCADO TESTE01/03CIDADE EXEMPLOBR", true)]
+    [InlineData(null, null, null, "MERCADO TESTE 01/03CIDADEBR", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10  CIDADE EXEMPLO BR", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10      CIDADE EXEMPLO  BR  ", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO*DECOR06/06 CIDADE BR", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 CIDADE EXEMPLO", false)]   // no country code: not a location
+    [InlineData(null, null, null, "LOJA EXEMPLO 01/03 SÃO EXEMPLO BR", true)]       // accented uppercase letters
+    [InlineData(null, null, null, "LOJA EXEMPLO01/03SÃO EXEMPLOBR", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 01/03 S.EXEMPLO BR", true)]         // dots, hyphens and apostrophes in the city
+    [InlineData(null, null, null, "LOJA EXEMPLO 01/03 STA. EXEMPLO BR", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 01/03   VILA-EXEMPLO  BR", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO01/03PORTO D'EXEMPLOBR", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 01/03 CIDADE EXEMPLO BRA", true)]   // a three-letter country code
+    [InlineData(null, null, null, "LOJA EXEMPLO01/03CIDADEBRA", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 01/03 BR", true)]                   // the country code with no city
+    [InlineData(null, null, null, "LOJA EXEMPLO 01/03BRA", true)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 Cidade Exemplo BR", false)] // lowercase is not a location
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 cidade exemplo br", false)]
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 CIDADE EXEMPLO ARG", false)] // only BR or BRA
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 -EXEMPLO BR", false)]        // a city word starts with a letter
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 CIDADE  EXEMPLO BR", false)] // words of a city are one space apart
+    // Ambiguous, documented: a trailing dd/mm date with day <= month and a location reads as an installment (5 of 10).
+    [InlineData(null, null, null, "COMPRA 05/10 CIDADE EXEMPLO BR", true)]
+    [InlineData(null, null, null, "COMPRA 25/10 CIDADE EXEMPLO BR", false)]        // day > month: never an installment
+    [InlineData(null, null, null, "LOJA EXEMPLO 03/10 LOJA 2 BR", false)]        // a digit is not part of a city
+    [InlineData(null, null, null, "LOJA EXEMPLO 15/10  CIDADE EXEMPLO BR", false)] // number past the count, after the cut too
+    // #1430: a trailing dd/mm/yy date is never an installment.
+    [InlineData(null, null, null, "COMPRA TESTE 12/05/26", false)]
+    [InlineData(null, null, null, "COMPRA TESTE 03/04/26  CIDADE EXEMPLO BR", false)]
+    [InlineData(null, null, null, "COMPRA TESTE 03/04/2026", false)]
     public void The_shared_mapper_decides_what_an_installment_is(string? paymentType, int? number, int? count, string? description, bool expected)
     {
         var line = CardLine(new OpenFinanceCardLineDetails { PaymentType = paymentType, InstallmentNumber = number, InstallmentCount = count }, description);

@@ -117,5 +117,5 @@ public sealed class PluggyLiveProbeTests
         : System.Text.RegularExpressions.Regex.Replace(diagnostics,
             "\"(lastUpdatedAtUtc|credentialExpiresAtUtc|balanceAtUtc|externalAccountId|balance|pendingAmount|balanceWithPending|pendingBillPayments|creditLimit"
             + "|availableCreditLimit|minimumPayment|billCloseDate|billDueDate|name|issuer|grossAmount|amountInvested|profit|incomeTax"
-            + "|financialTax|issueDate|dueDate|transactionsDateFrom|cardTransactionsDateFrom|sentFrom)\":(\"[^\"]*\"|-?[0-9.]+)", "\"$1\":\"<set>\"");
+            + "|financialTax|issueDate|dueDate|transactionsDateFrom|cardTransactionsDateFrom|cardTransactionsCreatedAtFrom|sentFrom)\":(\"[^\"]*\"|-?[0-9.]+)", "\"$1\":\"<set>\"");
 }

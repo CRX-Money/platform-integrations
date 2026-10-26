@@ -281,6 +281,86 @@
         "totalInstallments": 12,
         "installmentNumber": 7
       }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000f13",
+      "accountId": "00000000-0000-4000-8000-0000000000b2",
+      "date": "2026-09-21T03:00:00.000Z",
+      "description": "Mercado Teste 01/03",
+      "descriptionRaw": "MERCADO TESTE01/03CIDADE EXEMPLOBR",
+      "amount": 63.20,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": null,
+      "operationTypeAdditionalInfo": null,
+      "merchant": null,
+      "creditCardMetadata": {
+        "cardNumber": "1234",
+        "billId": "00000000-0000-4000-8000-0000000000f1",
+        "billPostDate": "2026-09-21",
+        "transactionDateTime": "2026-09-19T14:20:00.000Z"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000f14",
+      "accountId": "00000000-0000-4000-8000-0000000000b2",
+      "date": "2026-09-22T03:00:00.000Z",
+      "description": "Loja Exemplo Moda 03/10",
+      "descriptionRaw": "LOJA EXEMPLO MODA 03/10      CIDADE EXEMPLO  BR",
+      "amount": 129.90,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": null,
+      "operationTypeAdditionalInfo": null,
+      "merchant": null,
+      "creditCardMetadata": {
+        "cardNumber": "1234",
+        "billId": "00000000-0000-4000-8000-0000000000f2",
+        "billPostDate": "2026-09-22",
+        "transactionDateTime": "2026-07-08T16:45:00.000Z"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000f15",
+      "accountId": "00000000-0000-4000-8000-0000000000b2",
+      "date": "2026-09-23T03:00:00.000Z",
+      "description": "Compra Teste",
+      "descriptionRaw": "COMPRA TESTE 12/05/26",
+      "amount": 15.75,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": null,
+      "operationTypeAdditionalInfo": null,
+      "merchant": null,
+      "creditCardMetadata": {
+        "cardNumber": "1234",
+        "billId": "00000000-0000-4000-8000-0000000000f3",
+        "billPostDate": "2026-09-23",
+        "transactionDateTime": "2026-09-23T11:00:00.000Z"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000f16",
+      "accountId": "00000000-0000-4000-8000-0000000000b2",
+      "date": "2026-09-24T03:00:00.000Z",
+      "description": "Compra Teste",
+      "descriptionRaw": "COMPRA TESTE 03/04/26    CIDADE EXEMPLO BR",
+      "amount": 22.10,
+      "currencyCode": "BRL",
+      "type": "DEBIT",
+      "status": "POSTED",
+      "operationType": null,
+      "operationTypeAdditionalInfo": null,
+      "merchant": null,
+      "creditCardMetadata": {
+        "cardNumber": "1234",
+        "billId": "00000000-0000-4000-8000-0000000000f4",
+        "billPostDate": "2026-09-24",
+        "transactionDateTime": "2026-09-24T12:30:00.000Z"
+      }
     }
   ],
   "next": null

@@ -281,7 +281,7 @@ public sealed class PluggyInvestmentAndCardTests
         var result = await host.Plugin.SyncAsync(PluggyTestHost.Request(windowStart: new DateTimeOffset(2026, 11, 10, 12, 0, 0, TimeSpan.Zero)), Ct);
 
         Assert.Equal("2026-11-02", server.TransactionRequests(FakePluggyServer.BankAccountId).Single().Query("dateFrom"));
-        Assert.Equal("2026-09-11", server.TransactionRequests(FakePluggyServer.CardAccountId).Single().Query("dateFrom"));
+        Assert.Equal("2026-09-11", server.TransactionRequests(FakePluggyServer.CardAccountId).Single(r => r.Query("createdAtFrom") is null).Query("dateFrom"));
         var card = Row(result, CardAccountKey);
         Assert.Equal(0, card["sent"]!.GetValue<int>());
         Assert.Equal(42m, card["pendingAmount"]!.GetValue<decimal>());
