@@ -659,6 +659,7 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
         var amount = transaction.Amount is { } value
             ? Math.Abs(value)
             : throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy transaction {id} has no amount.");
+        var (accountAmount, foreign) = AccountCurrencyAmount(account, transaction, amount);
         var time = transaction.CreditCardMetadata?.TransactionDateTime ?? transaction.Date
             ?? throw new OpenFinanceSourceException(IntegrationErrorKind.Upstream, $"Pluggy transaction {id} has no date.");
 
@@ -670,7 +671,7 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
             SourceTransactionId: id,
             TransactionTime: time,
             Direction: direction,
-            Amount: amount,
+            Amount: accountAmount,
             Type: type,
             TypeDetail: FirstNonEmpty(transaction.OperationTypeAdditionalInfo),
             Description: description,
@@ -681,7 +682,29 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
             SourcePayload: line)
         {
             CardDetails = isCard ? NormalizeCardDetails(transaction.CreditCardMetadata) : null,
+            Foreign = foreign,
         };
+    }
+
+    /// <summary>
+    /// The line's amount in the account's currency and, on a line made in another currency, its original amount (#1440).
+    /// Pluggy's transaction carries <c>amount</c> in the transaction's <c>currencyCode</c> and, only when that currency
+    /// differs from the account's, <c>amountInAccountCurrency</c> ("Transaction amount in Account's Currency",
+    /// <see href="https://docs.pluggy.ai/reference/transactions-retrieve">GET /transactions/{id}</see>, the transaction
+    /// object). An international purchase on a BRL card is USD in <c>amount</c> and what the card was charged in
+    /// <c>amountInAccountCurrency</c>. Generic: a deposit line in another currency follows the same rule. A foreign line
+    /// without <c>amountInAccountCurrency</c> keeps <c>amount</c> and is flagged
+    /// (<see cref="OpenFinanceForeignAmount.AccountAmountMissing"/>); no rate is guessed.
+    /// </summary>
+    internal static (decimal Amount, OpenFinanceForeignAmount? Foreign) AccountCurrencyAmount(OpenFinanceAccount account, PluggyTransaction transaction, decimal amount)
+    {
+        var currency = FirstNonEmpty(transaction.CurrencyCode)?.ToUpperInvariant();
+        if (currency is null || string.Equals(currency, account.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+            return (amount, null);
+
+        return transaction.AmountInAccountCurrency is { } inAccountCurrency
+            ? (Math.Abs(inAccountCurrency), new OpenFinanceForeignAmount(currency, amount))
+            : (amount, new OpenFinanceForeignAmount(currency, amount) { AccountAmountMissing = true });
     }
 
     /// <summary>

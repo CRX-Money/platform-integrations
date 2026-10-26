@@ -30,6 +30,46 @@ has exactly one adapter, that adapter runs.
 | --- | --- | --- | --- |
 | Pluggy | `Pluggy` (`PluggyAdapter.Name`) | `.AddPluggy()` | `Pluggy/`, namespace `CrxMoney.Integrations.Providers.Br.OpenFinance.Pluggy` |
 
+## Changes after 1.0.0-preview.10
+
+- **A line made in another currency carries the amount in the account's currency (#1440).**
+  Pluggy's transaction has `amount` in the line's own `currencyCode` and, only when that
+  currency differs from the account's, `amountInAccountCurrency`: what the account was
+  charged or credited ([transaction object](https://docs.pluggy.ai/reference/transactions-retrieve)).
+  Up to preview.10 the adapter read `amount` alone and the event was labelled with the
+  account's currency, so a purchase of USD 10.00 charged BRL 55.20 on a BRL card became an
+  event of 10.00 BRL. Now, when the line's `currencyCode` is present and differs from the
+  account's (compared without case), the event's amount is `abs(amountInAccountCurrency)`
+  and its asset stays the account's currency; the original currency and absolute amount go
+  in provider data as `foreign` (`currencyCode`, `amount`). A foreign line without
+  `amountInAccountCurrency` keeps `amount`, gets `foreign.accountAmountMissing: true`, and is
+  counted in the run diagnostics (`foreignLinesWithoutAccountAmount`); no rate is guessed.
+  The rule is generic: it applies to deposit accounts as well as cards. Everything that
+  works on a line's amount follows: the card's `pendingAmount` and settled balance, and the
+  amount-and-date pairs. No bill total is computed from lines (a card's `bills` row reports
+  the issuer's totals), so bills need no change. In the model:
+  `OpenFinanceTransaction.Amount` is the account's amount and `OpenFinanceTransaction.Foreign`
+  (`OpenFinanceForeignAmount`) holds the original; an adapter for another aggregator sets both.
+
+  **Key change for those lines.** The line identity has always used the event's amount, so
+  a foreign line's identity now carries the amount in the account's currency
+  (`…|D|55.20` instead of `…|D|10.00`) and its idempotency key changes. A line in the
+  account's currency, and a foreign line without `amountInAccountCurrency`, keeps its key
+  byte for byte, except a line identical to a foreign one (same account, instant, direction
+  and the new amount), which can change ordinal, and so key, with it. A host that re-keys by
+  aggregator line id when the amount, type and asset match (CRX•Money #1428) takes the existing
+  item over in place, keeping its date and movement, once the host has corrected the stored
+  amount to the account's (CRX•Money #1439 does that from the stored `amountInAccountCurrency`
+  in the raw line); until then the amounts differ and the re-key does not apply. The version
+  impact is a change to the idempotency key of some lines, listed here as previews require.
+
+  **Host.** New provider-data key `foreign` on foreign lines (after the earlier keys, before
+  `sourcePayload`); new run-diagnostics keys after `connector`: `foreignLines` (sent lines
+  made in another currency) and `foreignLinesWithoutAccountAmount` (those of them whose
+  event carries the original amount).
+  Code: `PluggyOpenFinanceSource.AccountCurrencyAmount`, `OpenFinanceForeignAmount`,
+  `OpenFinanceTransactionMapper` (`foreign`).
+
 ## Changes after 1.0.0-preview.9
 
 - **The installment suffix is read after the location, and a trailing date is never one (#1430).**
@@ -429,7 +469,10 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   ISPB, branch, account; replaced by `counterpartyIsHolder: true` when the other
   side is the account holder itself, as in sweeps), `pix` when present, `card`
   (last four, bill, `issuerCompe`; after preview.8 also `paymentType`,
-  `billPostDate`, `billForecastDate`, `payeeMcc` and `installment`), a `transferHint` (`investment` for automatic
+  `billPostDate`, `billForecastDate`, `payeeMcc` and `installment`), `foreign` on a
+  line made in a currency other than the account's (after preview.10: `currencyCode`,
+  the original `amount`, and `accountAmountMissing: true` when the source did not report
+  the account's amount; the event's amount and asset are the account's), a `transferHint` (`investment` for automatic
   CDB sweeps and similar, and for settlements with the bank's own brokerage such
   as "Saída COR ITAUCOR LIQUIDACAO" or "Entrada COR OPERACOES B3", which
   aggregators categorise as card payments or dividends; tax the brokerage
@@ -497,7 +540,10 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   operator, so no Brazilian bank code has to live in the platform's database.
 - **Run diagnostics** (the provider block the host shows per run): `source`,
   `events`, `pendingSkipped`, `sentFrom` (absent on a full read),
-  `credentialExpiresAtUtc`, `accounts`, `transferPairs`, `connector` and `sourceDiagnostics`.
+  `credentialExpiresAtUtc`, `accounts`, `transferPairs`, `connector`, `foreignLines` and
+  `foreignLinesWithoutAccountAmount` (after preview.10: sent lines made in another currency,
+  and those of them sent with the original amount because the source gave no amount in the
+  account's currency) and `sourceDiagnostics`.
 
   `connector` (also on a connection test) is the connector the item reads through, when the plugin can tell:
   `id` (the aggregator's), `name`, `isBusiness`, `iconUrl` (when the aggregator gave one) and
@@ -727,7 +773,8 @@ Normalisation into the Open Finance model:
 | Pluggy | Open Finance model |
 | --- | --- |
 | `type` `CREDIT`/`DEBIT` | direction (Pluggy's card amounts carry the opposite sign to checking, so the sign is ignored) |
-| `abs(amount)` | amount |
+| `abs(amount)`; on a line whose `currencyCode` differs from the account's, `abs(amountInAccountCurrency)` (after preview.10) | amount, in the account's currency |
+| `currencyCode` and `abs(amount)` when the currency differs from the account's | the original currency and amount (`Foreign`), flagged when `amountInAccountCurrency` is missing |
 | `creditCardMetadata.transactionDateTime` or `date` | transaction instant |
 | `operationType` (`PIX`, `BOLETO`, `OUTROS`, …); `CARD` for card lines | type |
 | `operationTypeAdditionalInfo` | type detail (investment sweeps: `OUTROS` + `APL…/RES… CDB`) |
@@ -777,7 +824,8 @@ identification, cursor paging, API-key caching and renewal, sign normalisation,
 counterparties, transfer hints, pending lines, the card balance split, card installments and their dates
 (`transactions-card-installments.json`), installment identities across reads of any subset and their windowed
 sending (#1424), the installment suffix after a location and trailing dates (#1430), the card read by creation date
-merged by line id with its own paging (#1426), investment
+merged by line id with its own paging (#1426), lines in another currency on cards and deposit accounts, their keys and
+diagnostics (#1440), investment
 positions, movements and their page-number paging, sweep and bill-payment pairs,
 key stability and windowing, and failures, against an in-memory fake of the API
 (`/investments` and `/investments/{id}/transactions` as documented, with paging). The fixtures are **written from synthetic data** in the shape the

@@ -130,7 +130,9 @@ internal sealed record PluggyTransaction(
     [property: JsonPropertyName("operationTypeAdditionalInfo")] string? OperationTypeAdditionalInfo,
     [property: JsonPropertyName("paymentData")] PluggyPaymentData? PaymentData,
     [property: JsonPropertyName("merchant")] PluggyMerchant? Merchant,
-    [property: JsonPropertyName("creditCardMetadata")] PluggyCardMetadata? CreditCardMetadata);
+    [property: JsonPropertyName("creditCardMetadata")] PluggyCardMetadata? CreditCardMetadata,
+    [property: JsonPropertyName("currencyCode")] string? CurrencyCode = null,
+    [property: JsonPropertyName("amountInAccountCurrency")] decimal? AmountInAccountCurrency = null);
 
 internal sealed record PluggyPaymentData(
     [property: JsonPropertyName("payer")] PluggyParty? Payer,

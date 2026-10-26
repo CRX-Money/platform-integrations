@@ -39,7 +39,9 @@ public static partial class OpenFinanceTransactionMapper
     /// data and the bill dates are deliberately left out: aggregators enrich counterparties after the fact and report
     /// them unevenly, and a bill post date can still be Open Finance's placeholder on a posted line, so either would
     /// change keys. Lines that are still identical (two identical purchases in the same second) are told apart by an
-    /// ordinal (see <see cref="IdempotencyKey"/>).
+    /// ordinal (see <see cref="IdempotencyKey"/>). The amount is the one in the account's currency: on a line made in
+    /// another currency (<see cref="OpenFinanceTransaction.Foreign"/>) what the account was charged, never the original
+    /// amount (#1440).
     /// </summary>
     public static string LineIdentity(OpenFinanceAccount account, OpenFinanceTransaction transaction)
     {
@@ -414,6 +416,17 @@ public static partial class OpenFinanceTransactionMapper
                 writer.WriteEndObject();
             }
 
+            if (transaction.Foreign is { } foreign)
+            {
+                // After the earlier keys (#1440): the original currency and amount; the event's amount is the account's.
+                writer.WriteStartObject("foreign");
+                writer.WriteString("currencyCode", foreign.CurrencyCode);
+                writer.WriteNumber("amount", foreign.Amount);
+                if (foreign.AccountAmountMissing)
+                    writer.WriteBoolean("accountAmountMissing", true);
+                writer.WriteEndObject();
+            }
+
             if (transaction.SourcePayload.ValueKind is JsonValueKind.Object)
             {
                 writer.WritePropertyName("sourcePayload");
@@ -591,6 +604,16 @@ public static class OpenFinanceImportSchemas
               }
             },
             "pix": { "type": "object", "properties": { "endToEndId": { "type": "string" }, "txId": { "type": "string" }, "key": { "type": "string" } } },
+            "foreign": {
+              "type": "object",
+              "description": "On a line made in a currency other than the account's (an international card purchase): the original currency and amount. The event's amount and asset are the account's: what the account was charged or credited",
+              "required": ["currencyCode", "amount"],
+              "properties": {
+                "currencyCode": { "type": "string", "pattern": "^[A-Z]{3}$", "description": "ISO 4217 code of the original currency" },
+                "amount": { "type": "number", "minimum": 0, "description": "The original amount, positive, in currencyCode" },
+                "accountAmountMissing": { "const": true, "description": "Present when the source did not report the amount in the account's currency: the event's amount is then the original amount, not converted (no rate is guessed)" }
+              }
+            },
             "sourcePayload": { "description": "The aggregator's raw line, verbatim" }
           }
         }

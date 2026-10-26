@@ -107,7 +107,10 @@ public sealed record OpenFinancePixIds(string? EndToEndId, string? TxId, string?
 /// <param name="SourceTransactionId">The aggregator's own id: becomes the import's ExternalId, never its idempotency key.</param>
 /// <param name="TransactionTime">The instant the bank reports for the movement, to the second when available.</param>
 /// <param name="Direction">Money in or out for the account holder.</param>
-/// <param name="Amount">Positive amount in the account currency.</param>
+/// <param name="Amount">
+/// Positive amount in the account currency: on a line made in another currency, what the account was charged or
+/// credited (see <see cref="OpenFinanceTransaction.Foreign"/>).
+/// </param>
 /// <param name="Type">Normalised Open Finance type: <c>PIX</c>, <c>TED</c>, <c>BOLETO</c>, <c>CARD</c>, <c>OUTROS</c>, ...</param>
 /// <param name="TypeDetail">The source's free-text complement of the type (Pluggy <c>operationTypeAdditionalInfo</c>).</param>
 /// <param name="Description">The bank's description line.</param>
@@ -142,6 +145,27 @@ public sealed record OpenFinanceTransaction(
     /// reports any of it. It never takes part in the idempotency key.
     /// </summary>
     public OpenFinanceCardLineDetails? CardDetails { get; init; }
+
+    /// <summary>
+    /// On a line made in a currency other than the account's (an international card purchase, #1440): the original
+    /// currency and amount. <see cref="Amount"/> is still the amount in the account's currency, unless
+    /// <see cref="OpenFinanceForeignAmount.AccountAmountMissing"/> says the source did not report it. Null on a line in
+    /// the account's currency. It never takes part in the idempotency key.
+    /// </summary>
+    public OpenFinanceForeignAmount? Foreign { get; init; }
+}
+
+/// <summary>The original currency and amount of a line made in a currency other than the account's (#1440).</summary>
+/// <param name="CurrencyCode">The ISO 4217 code of the original currency, upper case.</param>
+/// <param name="Amount">The positive amount in that currency.</param>
+public sealed record OpenFinanceForeignAmount(string CurrencyCode, decimal Amount)
+{
+    /// <summary>
+    /// True when the source did not report the amount in the account's currency, so the line's
+    /// <see cref="OpenFinanceTransaction.Amount"/> is the original amount: no rate is guessed. The run diagnostics count
+    /// these lines (<c>foreignLinesWithoutAccountAmount</c>).
+    /// </summary>
+    public bool AccountAmountMissing { get; init; }
 }
 
 /// <summary>
