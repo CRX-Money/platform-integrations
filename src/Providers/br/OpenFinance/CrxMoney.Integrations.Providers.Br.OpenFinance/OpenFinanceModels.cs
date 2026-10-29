@@ -277,7 +277,8 @@ public sealed record OpenFinanceLineLinks
 
     /// <summary>
     /// On a card line: the bill the line names (<see cref="OpenFinanceTransaction.CardBillId"/>), when the read listed
-    /// it. It may date an installment (<see cref="OpenFinanceTransactionMapper.EventDate"/>) and adds no provider data.
+    /// it. It gives an installment its bill date (<see cref="OpenFinanceTransactionMapper.BillDate"/>), which sends the
+    /// line on a windowed read and is reported as <c>card.installment.billDate</c>; it never dates the event (#1476).
     /// </summary>
     public OpenFinanceCardBill? Bill { get; init; }
 }

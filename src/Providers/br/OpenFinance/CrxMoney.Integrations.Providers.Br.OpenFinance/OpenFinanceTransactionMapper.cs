@@ -119,8 +119,10 @@ public static partial class OpenFinanceTransactionMapper
 
     /// <summary>
     /// The Brazilian date of the line's import event (<see cref="EventTime"/>): its booking date, for every line since
-    /// #1476 (up to preview.11 a card installment was dated at its bill, see <see cref="BillDate"/>).
+    /// #1476. Up to preview.11 a card installment was dated at its bill; that date is now <see cref="BillDate"/>, and
+    /// <paramref name="bill"/> is ignored.
     /// </summary>
+    [Obsolete("Since 1.0.0-preview.12 every event is dated at its booking date: use EventTime for the event's instant, BillDate for an installment's bill date.")]
     public static DateOnly EventDate(OpenFinanceAccount account, OpenFinanceTransaction transaction, OpenFinanceCardBill? bill = null) =>
         transaction.BookingDate;
 

@@ -133,14 +133,14 @@ public sealed class PluggyIntegrationPluginTests
         });
         Assert.All(bankPages, r => Assert.Null(r.Query("createdAtFrom")));
         Assert.All(bankPages, r => Assert.Equal("2026-09-19", r.Query("dateFrom")));
-        // Cards are read from 62 days before today (14 Oct) so that every pending purchase is seen, by date and, in a
+        // Cards are read from 62 days before the read date (19 Sep, #1475) so that every pending purchase is seen, by date and, in a
         // read of its own (Pluggy takes no dateFrom with createdAtFrom), by when Pluggy stored the line (#1426).
         var cardPages = server.TransactionRequests(FakePluggyServer.CardAccountId);
         Assert.Equal(3, cardPages.Count);
-        Assert.All(cardPages.Take(2), r => Assert.Equal("2026-08-13", r.Query("dateFrom")));
+        Assert.All(cardPages.Take(2), r => Assert.Equal("2026-07-19", r.Query("dateFrom")));
         Assert.All(cardPages.Take(2), r => Assert.Null(r.Query("createdAtFrom")));
         Assert.Null(cardPages[2].Query("dateFrom"));
-        Assert.Equal("2026-08-13T00:00:00.000Z", cardPages[2].Query("createdAtFrom"));
+        Assert.Equal("2026-07-19T00:00:00.000Z", cardPages[2].Query("createdAtFrom"));
         Assert.Equal(
             ["00000000-0000-4000-8000-000000000c05", "00000000-0000-4000-8000-000000000c06", "00000000-0000-4000-8000-000000000c07",
              "00000000-0000-4000-8000-000000000c08", "00000000-0000-4000-8000-000000000c09", "00000000-0000-4000-8000-000000000d02"],
@@ -148,8 +148,8 @@ public sealed class PluggyIntegrationPluginTests
         var diagnostics = JsonNode.Parse(result.ProviderDiagnosticsJson!)!;
         Assert.Equal(6, diagnostics["sourceDiagnostics"]!["transactionPages"]!.GetValue<int>()); // 3 bank + 2 card (d01..d03) + 1 card by createdAt (empty)
         Assert.Equal("2026-09-19", diagnostics["sourceDiagnostics"]!["transactionsDateFrom"]!.GetValue<string>());
-        Assert.Equal("2026-08-13", diagnostics["sourceDiagnostics"]!["cardTransactionsDateFrom"]!.GetValue<string>());
-        Assert.Equal("2026-08-13T00:00:00.000Z", diagnostics["sourceDiagnostics"]!["cardTransactionsCreatedAtFrom"]!.GetValue<string>());
+        Assert.Equal("2026-07-19", diagnostics["sourceDiagnostics"]!["cardTransactionsDateFrom"]!.GetValue<string>());
+        Assert.Equal("2026-07-19T00:00:00.000Z", diagnostics["sourceDiagnostics"]!["cardTransactionsCreatedAtFrom"]!.GetValue<string>());
         Assert.Equal(0, diagnostics["sourceDiagnostics"]!["cardLinesByCreatedAt"]!.GetValue<int>());
     }
 
@@ -297,8 +297,9 @@ public sealed class PluggyIntegrationPluginTests
         Assert.Equal("2026-10-04", server.TransactionRequests(FakePluggyServer.BankAccountId).Single().Query("dateFrom"));
         var cardReads = server.TransactionRequests(FakePluggyServer.CardAccountId);
         Assert.Equal([["accountId", "dateFrom"], ["accountId", "createdAtFrom"]], cardReads.Select(r => r.QueryNames()));
-        Assert.Equal("2026-08-13", cardReads[0].Query("dateFrom"));
-        Assert.Equal("2026-08-13T00:00:00.000Z", cardReads[1].Query("createdAtFrom"));
+        // The card from 62 days before the read date (4 Oct, #1475).
+        Assert.Equal("2026-08-03", cardReads[0].Query("dateFrom"));
+        Assert.Equal("2026-08-03T00:00:00.000Z", cardReads[1].Query("createdAtFrom"));
         var diagnostics = JsonNode.Parse(result.ProviderDiagnosticsJson!)!;
         Assert.Equal("2026-10-05", diagnostics["sentFrom"]!.GetValue<string>());
         // Bank: c09 read; card: d01..d03 read (pending lookback), d02 sent.

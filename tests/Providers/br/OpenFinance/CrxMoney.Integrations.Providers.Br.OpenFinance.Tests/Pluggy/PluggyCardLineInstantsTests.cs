@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using CrxMoney.Integrations.Abstractions.Sync;
 using CrxMoney.Integrations.Providers.Br.OpenFinance.Tests.Pluggy.Support;
+using Microsoft.Extensions.Time.Testing;
 
 namespace CrxMoney.Integrations.Providers.Br.OpenFinance.Tests.Pluggy;
 
@@ -102,6 +103,24 @@ public sealed class PluggyCardLineInstantsTests
         Assert.Equal(1, CardRow(incremental)["sentByChange"]!.GetValue<int>());
         Assert.Equal(0, CardRow(incremental)["pendingSkipped"]!.GetValue<int>());
         Assert.Null(CardRow(incremental)["pendingOldestDate"]);
+    }
+
+    [Fact]
+    public async Task A_sync_seventy_days_after_the_last_success_still_reads_and_sends_a_purchase_that_was_pending_then()
+    {
+        // The last success started its window on 2026-10-12, the purchase of 2026-09-20 pending then; the next sync comes
+        // 70 days later (a consent lapse), after the bill closed on 2026-11-05. The card is read from 62 days before the
+        // window's read date (2026-08-03), not before today (2026-10-12 would miss the line).
+        var server = FakePluggyServer.WithFixtures();
+        server.CardLines = new JsonArray(Purchase("POSTED", "2026-11-05T16:21:37.586Z"));
+        using var host = new PluggyTestHost(server, new FakeTimeProvider(new DateTimeOffset(2026, 12, 21, 12, 0, 0, TimeSpan.Zero)));
+
+        var result = await host.Plugin.SyncAsync(PluggyTestHost.Request(windowStart: WindowStart), Ct);
+
+        Assert.Equal(IntegrationSyncStatus.Succeeded, result.Status);
+        Assert.Single(CardEvents(result));
+        Assert.Equal("2026-08-03", Diagnostics(result)["sourceDiagnostics"]!["cardTransactionsDateFrom"]!.GetValue<string>());
+        Assert.Equal(1, Diagnostics(result)["sentByChange"]!.GetValue<int>());
     }
 
     [Fact]

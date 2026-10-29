@@ -72,7 +72,8 @@ has exactly one adapter, that adapter runs.
   purchase at its bill) reads `card.installment.billDate`. In the model:
   `OpenFinanceTransactionMapper.EventTime` (new) gives the event's instant,
   `OpenFinanceTransactionMapper.BillDate` (new) an installment's bill date, and
-  `EventDate` now returns the booking date for every line.
+  `EventDate` now returns the booking date for every line, ignores its `bill`
+  argument and is marked `[Obsolete]` (use `EventTime` or `BillDate`).
 
 - **A purchase that posts long after its date is sent when it posts (#1475).**
   A card purchase stays `PENDING` at Pluggy until its bill closes; the plugin never
@@ -88,16 +89,25 @@ has exactly one adapter, that adapter runs.
   fills with the later of `createdAt` and `updatedAt`. Pluggy documents a
   `createdAtFrom` filter but no `updatedAtFrom`
   ([reference](https://docs.pluggy.ai/reference/transactions-list-by-cursor)), so the
-  test is made on the lines the read already holds: a card is read from at least 62 days
-  before today, which covers the cycle of an open bill. An adapter that does not know
+  test is made on the lines the read already holds: a card is read from 62 days before the
+  window's first day (since this change anchored on the window, not on today, so a sync
+  that comes long after the last success, after a consent lapse or an idle item, still
+  holds the purchases that were pending then), which covers the cycle of an open bill.
+  An adapter that does not know
   when its aggregator changed a line leaves `SourceUpdatedAt` null and its lines are sent
   by their dates as before. The rule is generic: a deposit line the source posts late is
   sent the same way when its read holds it.
 
   **Keys and ordinals.** No key changes. A line sent this way is in the date read, which
   holds every line of each date it covers, so it is numbered as in a full read. Lines the
-  aggregator touches for other reasons (Pluggy moves `updatedAt` on some lines at a
-  refresh) are sent again under the keys the host already holds.
+  aggregator touches for other reasons are sent again: Pluggy moves `updatedAt` when it
+  refreshes a line's category or other enrichment, and when it reports the line's instant
+  three hours off (a drift, which changes the key). The host sees them again: a known key
+  is compared by its replay planner (enrichment is refreshed in place), a drifted key goes
+  through its re-key by line id. A line only the `createdAtFrom` read holds (dated before
+  the card's read date) takes its ordinal from the lines of its day that read holds, which
+  may be part of the day: two identical lines of that day, one of them outside the read,
+  could swap ordinals (rare; the #1426 note below).
 
   **Diagnostics**, after the earlier keys. Run level: `sentChangedFromUtc` (the instant a
   line's change is compared with, absent on a full read), `sentByChange` (posted lines
@@ -190,7 +200,7 @@ has exactly one adapter, that adapter runs.
   received those lines; only a full-history sync did (the known gap #1424 left). On a
   windowed sync the Pluggy adapter now reads each credit card twice: by `dateFrom` as
   before, and by `createdAtFrom` (when Pluggy stored the line) from the same date, the
-  card's read date (`cardTransactionsDateFrom`, at least 62 days before today), at
+  card's read date (`cardTransactionsDateFrom`, at least 62 days before today; since preview.12, 62 days before the window), at
   00:00:00.000Z. Pluggy takes no `dateFrom` together with `createdAtFrom`
   ([reference](https://docs.pluggy.ai/reference/transactions-list-by-cursor)), so it is
   a read of its own, paged by its own cursor. The lines only the second read returns
@@ -747,8 +757,9 @@ accounts needs Pluggy's commercial plan or another aggregator.
   calendar. A full-history sync (no window start) sends no `dateFrom`. Each
   response's `next` (`?accountId=…&after=…`) is reduced to its `after` cursor and
   the next page is requested with the same account and `dateFrom`, always on the
-  Pluggy host. **Cards** are read from at least 62 days before today
-  (`cardTransactionsDateFrom` in the diagnostics), so every pending purchase of the
+  Pluggy host. **Cards** are read from 62 days before the window's first day
+  (`cardTransactionsDateFrom` in the diagnostics; up to preview.11, at least 62 days
+  before today), so every pending purchase of the
   open bill is in the read; see "Card balances" below. An installment line's `date`
   is usually its bill post date, so the window catches installment 2 and later of an
   older purchase when its bill arrives. The tail of a long series is the exception:
@@ -830,8 +841,8 @@ Limits of the split:
   parcelado purchase against the limit, but post one instalment per bill. The
   future instalments are in the used limit and are neither posted nor pending
   lines, so `balance` is higher than the posted lines by those instalments.
-- **Pending lines older than 62 days** (a bill that closes very late) would be
-  missed and counted as settled.
+- **Pending lines older than 62 days before the window** (a bill that closes very late)
+  would be missed and counted as settled.
 - **Shared limits.** Additional cards and disaggregated credit lines
   (`creditData.disaggregatedCreditLimits`) can share one limit; the adapter uses the
   account's own `balance` and does not combine lines.
@@ -897,7 +908,7 @@ Normalisation into the Open Finance model:
   imported by the daily sync when Pluggy reports it with its bill post date as
   `date`, with the key any other read gives it. Since #1426 the tail of a long
   series, whose `date` is the purchase date, is read too, by `createdAtFrom`. A tail
-  installment Pluggy stored before the card's read date (62 days before today) and
+  installment Pluggy stored before the card's read date (62 days before the window) and
   whose bill is dated later still needs a full-history sync, which imports nothing
   twice after the host migration (changes after preview.8).
 - No link between account lines and investment movements, and no card id on the

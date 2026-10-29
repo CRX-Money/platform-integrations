@@ -495,7 +495,7 @@ public sealed class PluggyCardInstallmentTests
         Assert.Equal("2026-10-10", BillDate(sent));
         Assert.Equal("bill", Text(Card(sent)["installment"]!["billDateSource"]));
 
-        // Stored before the card's read date (62 days before today): no read holds it, as before #1426.
+        // Stored before the card's read date (62 days before the window's read date, 3 Aug): no read holds it, as before #1426.
         line["createdAt"] = "2026-08-01T06:00:00.000Z";
         var stale = await SyncAsync(new JsonArray(line.DeepClone()), windowStart);
         Assert.Empty(CardEvents(stale));
@@ -537,7 +537,7 @@ public sealed class PluggyCardInstallmentTests
         var source = JsonNode.Parse(result.ProviderDiagnosticsJson!)!["sourceDiagnostics"]!;
         Assert.Equal(1, source["cardsWithoutCreatedAtRead"]!.GetValue<int>());
         Assert.Equal(0, source["cardLinesByCreatedAt"]!.GetValue<int>());
-        Assert.Equal("2026-08-13T00:00:00.000Z", Text(source["cardTransactionsCreatedAtFrom"]));
+        Assert.Equal("2026-07-17T00:00:00.000Z", Text(source["cardTransactionsCreatedAtFrom"]));
     }
 
     /// <summary>
@@ -554,7 +554,7 @@ public sealed class PluggyCardInstallmentTests
         tail["createdAt"] = "2026-10-13T06:00:00.000Z";
         tail["creditCardMetadata"]!["billId"] = "00000000-0000-4000-8000-0000000000e1";
         lines.Add(tail);
-        // Sent from 2026-09-18; the card is read from 2026-08-13 (62 days before today), by date and by createdAt.
+        // Sent from 2026-09-18; the card is read from 2026-07-17 (62 days before the read date, #1475), by date and by createdAt.
         var windowStart = new DateTimeOffset(2026, 9, 25, 12, 0, 0, TimeSpan.Zero);
 
         var server = FakePluggyServer.WithFixtures();
@@ -587,7 +587,7 @@ public sealed class PluggyCardInstallmentTests
         Assert.All(createdAtPages, r => Assert.Null(r.Query("dateFrom")));
         Assert.Null(createdAtPages[0].Query("after"));
         Assert.All(createdAtPages.Skip(1), r => Assert.NotNull(r.Query("after")));
-        var dateReadLines = DateReadLines(lines, new DateOnly(2026, 8, 13));
+        var dateReadLines = DateReadLines(lines, new DateOnly(2026, 7, 17));
         Assert.Equal((dateReadLines + 2) / 3, cardRequests.Count(r => r.Query("createdAtFrom") is null));
         var source = JsonNode.Parse(result.ProviderDiagnosticsJson!)!["sourceDiagnostics"]!;
         Assert.Equal(server.RequestsTo("/v2/transactions").Count, source["transactionPages"]!.GetValue<int>());
@@ -686,7 +686,9 @@ public sealed class PluggyCardInstallmentTests
 
         Assert.Equal(D(expected), OpenFinanceTransactionMapper.BillDate(Card1234, line, bill));
         // #1476: the event's date is the booking date whatever the bill, and its instant the issuer's.
+#pragma warning disable CS0618 // EventDate is obsolete since #1476; its behaviour stays pinned until it is removed.
         Assert.Equal(new DateOnly(2026, 3, 2), OpenFinanceTransactionMapper.EventDate(Card1234, line, bill));
+#pragma warning restore CS0618
         Assert.Equal(line.TransactionTime, OpenFinanceTransactionMapper.EventTime(Card1234, line));
     }
 
