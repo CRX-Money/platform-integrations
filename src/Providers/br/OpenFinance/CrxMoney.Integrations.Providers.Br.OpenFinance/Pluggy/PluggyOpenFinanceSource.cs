@@ -683,8 +683,17 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
         {
             CardDetails = isCard ? NormalizeCardDetails(transaction.CreditCardMetadata) : null,
             Foreign = foreign,
+            SourceUpdatedAt = Latest(transaction.CreatedAt, transaction.UpdatedAt),
         };
     }
+
+    /// <summary>
+    /// The later of Pluggy's <c>createdAt</c> and <c>updatedAt</c> (#1475). A card purchase stays PENDING until its bill
+    /// closes and then turns POSTED under the same id, keeping its <c>date</c> and <c>createdAt</c>; its <c>updatedAt</c>
+    /// moves to the closing. Pluggy documents no <c>updatedAtFrom</c> filter, so the line is found in the date read.
+    /// </summary>
+    private static DateTimeOffset? Latest(DateTimeOffset? createdAt, DateTimeOffset? updatedAt) =>
+        createdAt is { } created && updatedAt is { } updated ? (created > updated ? created : updated) : createdAt ?? updatedAt;
 
     /// <summary>
     /// The line's amount in the account's currency and, on a line made in another currency, its original amount (#1440).

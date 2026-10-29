@@ -14,7 +14,7 @@ dotnet add package CrxMoney.Integrations.Countries.Br --prerelease
 | --- | --- |
 | `BrazilianTaxId` | Parses a formatted or bare CPF/CNPJ (including the 2026 alphanumeric CNPJ) and accepts it only with valid check digits, so masked values never become identifiers. |
 | `BrazilianBankAccount` | A deposit account as the banks identify it: COMPE + branch + account with check digit. `ExternalAccountId` is `br:{compe}:{branch}:{number}`; cards are `br:{compe}:card:{last4}`; investment positions are `br:{compe}:inv:{basis}:{key}`. |
-| `BrazilBankingCalendar` | São Paulo booking dates; imports are dated at midnight of the booking date (`2026-03-10T00:00-03:00`). |
+| `BrazilBankingCalendar` | São Paulo booking dates; `StartOfDay` gives midnight of a booking date (`2026-03-10T00:00-03:00`), at which deposit lines are imported, and `TimeZone` the zone a card line's instant is expressed in. |
 | `BrazilianInstitutions` | The account operators: COMPE code to display name and official website (below). |
 | `BrazilianInstitutionMarks` | The marks (logos) that identify those institutions in a connect list: `TryOpen(key, out stream, out mediaType)`; `BrazilianInstitution.MarkResourceName` names the embedded resource (below). `TryOpenConnector(connectorId, ...)` opens a business connector's own mark. |
 | `BrazilianInstitutionConnectors` | The aggregator's connectors per institution: the main one (its icon is the institution's mark) and the business (PJ) variant (Inter Empresas next to Inter): `Find(connectorId)`, `For(compeOrIspb, isBusiness)`. |

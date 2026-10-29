@@ -12,9 +12,9 @@ namespace CrxMoney.Integrations.Providers.Br.OpenFinance;
 /// <summary>
 /// Maps <see cref="OpenFinanceTransaction"/>s to <see cref="IntegrationImportEvent"/>s the same way for
 /// every aggregator: BRL <c>deposit</c>/<c>withdrawal</c>, positive amount, the bank's own account
-/// identity as external account, the booking date at midnight in Brazil (a card installment: its bill's date, see
-/// <see cref="EventDate"/>), and an idempotency key built only from what the bank reports, so the same line read
-/// through another aggregator gets the same key.
+/// identity as external account, a card line at the issuer's instant and a deposit line at midnight in Brazil of its
+/// booking date (see <see cref="EventTime"/>), and an idempotency key built only from what the bank reports, so the same
+/// line read through another aggregator gets the same key.
 /// </summary>
 public static partial class OpenFinanceTransactionMapper
 {
@@ -76,8 +76,8 @@ public static partial class OpenFinanceTransactionMapper
 
     /// <summary>
     /// Maps one posted line with what the plugin found on the other side of a transfer-like line and, on a card line,
-    /// the bill it names (<paramref name="links"/>). Links add provider data and may date a card installment at its bill
-    /// (<see cref="EventDate"/>); the key is the same as without them.
+    /// the bill it names (<paramref name="links"/>). Links add provider data, a card installment's <c>billDate</c> among
+    /// it (<see cref="BillDate"/>); neither the event's instant nor its key depends on them.
     /// </summary>
     /// <exception cref="InvalidOperationException">The line is pending or the account has no bank identity.</exception>
     public static IntegrationImportEvent Map(OpenFinanceAccount account, OpenFinanceTransaction transaction, int ordinal, string sourceName, OpenFinanceLineLinks? links)
@@ -87,47 +87,61 @@ public static partial class OpenFinanceTransactionMapper
 
         var isCredit = transaction.Direction == OpenFinanceDirection.Credit;
         var installment = Installment(account, transaction);
-        var dating = Dating(transaction, installment, links?.Bill);
+        var billDate = installment is null ? null : InstallmentBillDate(transaction, installment, links?.Bill);
         return new IntegrationImportEvent(
             ExternalId: transaction.SourceTransactionId,
             IdempotencyKey: IdempotencyKey(LineIdentity(account, transaction), ordinal),
             Type: isCredit ? DepositType : WithdrawalType,
             Side: "Single",
-            OccurredAtUtc: BrazilBankingCalendar.StartOfDay(dating.Date),
+            OccurredAtUtc: EventTime(account, transaction),
             ExternalAccountId: account.ExternalAccountId,
             AssetCode: account.CurrencyCode,
             Quantity: null,
             Amount: transaction.Amount,
             FeeAmount: null,
             FeeAssetCode: null,
-            ProviderData: BuildProviderData(account, transaction, sourceName, links, installment, dating.Source),
+            ProviderData: BuildProviderData(account, transaction, sourceName, links, installment, billDate),
             ProviderDataSchemaId: isCredit ? OpenFinanceImportSchemas.DepositSchemaId : OpenFinanceImportSchemas.WithdrawalSchemaId,
             ProviderDataSchemaVersion: OpenFinanceImportSchemas.Version1);
     }
 
     /// <summary>
-    /// The date a line's import event gets. A card installment (<see cref="Installment"/>) is dated from its bill, so
-    /// the books follow the invoice and a past month stops growing when a later installment arrives. The first of these
-    /// that is <b>later than the purchase date</b> wins (an installment is never dated back before its purchase):
+    /// The instant a line's import event gets. A card line, an installment included, is dated at the issuer's instant
+    /// (<see cref="OpenFinanceTransaction.TransactionTime"/>: Pluggy's <c>creditCardMetadata.transactionDateTime</c>, else
+    /// its <c>date</c>), with Brazil's offset (<c>2026-03-14T12:09:26-03:00</c>), never at a bill (#1476); the bill stays a
+    /// fact of the line (<c>card.billId</c>, <c>card.billPostDate</c>, <c>card.installment.billDate</c>). A deposit line is
+    /// dated at midnight in Brazil of its booking date, as before. The idempotency key does not depend on it.
+    /// </summary>
+    public static DateTimeOffset EventTime(OpenFinanceAccount account, OpenFinanceTransaction transaction) =>
+        account.Kind == OpenFinanceAccountKind.CreditCard
+            ? TimeZoneInfo.ConvertTime(transaction.TransactionTime, BrazilBankingCalendar.TimeZone)
+            : BrazilBankingCalendar.StartOfDay(transaction.BookingDate);
+
+    /// <summary>
+    /// The Brazilian date of the line's import event (<see cref="EventTime"/>): its booking date, for every line since
+    /// #1476 (up to preview.11 a card installment was dated at its bill, see <see cref="BillDate"/>).
+    /// </summary>
+    public static DateOnly EventDate(OpenFinanceAccount account, OpenFinanceTransaction transaction, OpenFinanceCardBill? bill = null) =>
+        transaction.BookingDate;
+
+    /// <summary>
+    /// The date a card installment's bill puts it on, or <c>null</c> for any other line and for an installment on no
+    /// known bill yet. The first of these that is <b>later than the purchase date</b> wins:
     /// <list type="number">
     /// <item><description><c>billPostDate</c>, the date the line was put on its bill (Open Finance's placeholder <c>0001-01-01</c> counts as missing);</description></item>
     /// <item><description>the bill the line names (<paramref name="bill"/>, matched by <see cref="OpenFinanceTransaction.CardBillId"/>): its closing date, else its due date;</description></item>
-    /// <item><description>the first day of the month of <c>billForecastDate</c>;</description></item>
-    /// <item><description>otherwise the line keeps its booking date.</description></item>
+    /// <item><description>the first day of the month of <c>billForecastDate</c>.</description></item>
     /// </list>
-    /// Every other line, a single purchase included, is dated at its booking date. The idempotency key does not depend
-    /// on this date. The shared plugin sends a line when this date or its booking date is inside the sync window (#1424),
-    /// so installment 2 and later of an older purchase is sent when its bill arrives.
+    /// The event is never dated at it (#1476); it is reported as <c>card.installment.billDate</c>, and the shared plugin
+    /// sends a line when this date or its booking date is inside the sync window (#1424), so installment 2 and later of an
+    /// older purchase, which carries the purchase instant, is sent when its bill arrives.
     /// </summary>
-    public static DateOnly EventDate(OpenFinanceAccount account, OpenFinanceTransaction transaction, OpenFinanceCardBill? bill = null) =>
-        Dating(transaction, Installment(account, transaction), bill).Date;
+    public static DateOnly? BillDate(OpenFinanceAccount account, OpenFinanceTransaction transaction, OpenFinanceCardBill? bill = null) =>
+        Installment(account, transaction) is { } installment ? InstallmentBillDate(transaction, installment, bill)?.Date : null;
 
-    /// <summary>The event's date and, for an installment, what it came from (<c>card.installment.dateSource</c>).</summary>
-    private static (DateOnly Date, string? Source) Dating(OpenFinanceTransaction transaction, OpenFinanceInstallment? installment, OpenFinanceCardBill? bill)
+    /// <summary>An installment's bill date and what it came from (<c>card.installment.billDateSource</c>).</summary>
+    private static (DateOnly Date, string Source)? InstallmentBillDate(OpenFinanceTransaction transaction, OpenFinanceInstallment installment, OpenFinanceCardBill? bill)
     {
-        if (installment is null)
-            return (transaction.BookingDate, null);
-
         var purchase = installment.PurchaseDate;
         if (BillPostDate(transaction) is { } posted && posted > purchase)
             return (posted, "billPostDate");
@@ -136,8 +150,11 @@ public static partial class OpenFinanceTransactionMapper
         if (transaction.CardDetails?.BillForecastDate is { } forecast && forecast != NoBillDate
             && new DateOnly(forecast.Year, forecast.Month, 1) is var forecastMonth && forecastMonth > purchase)
             return (forecastMonth, "billForecastDate");
-        return (transaction.BookingDate, "purchase");
+        return null;
     }
+
+    /// <summary>What a card line's event is dated from (<c>card.installment.dateSource</c>): the issuer's instant (#1476).</summary>
+    public const string TransactionDateSource = "transaction";
 
     /// <summary>
     /// The installment a card line is, or <c>null</c> for a single purchase and any line of a deposit account. A line
@@ -324,7 +341,7 @@ public static partial class OpenFinanceTransactionMapper
     private static readonly HashSet<string> InvestmentProducts = new(StringComparer.Ordinal) { "CDB", "LCI", "LCA", "POUPANCA" };
     private static readonly HashSet<string> InvestmentMovements = new(StringComparer.Ordinal) { "APLICACAO", "RESGATE" };
 
-    private static string BuildProviderData(OpenFinanceAccount account, OpenFinanceTransaction transaction, string sourceName, OpenFinanceLineLinks? links, OpenFinanceInstallment? installment, string? dateSource)
+    private static string BuildProviderData(OpenFinanceAccount account, OpenFinanceTransaction transaction, string sourceName, OpenFinanceLineLinks? links, OpenFinanceInstallment? installment, (DateOnly Date, string Source)? billDate)
     {
         var isCredit = transaction.Direction == OpenFinanceDirection.Credit;
         using var stream = new MemoryStream();
@@ -354,7 +371,7 @@ public static partial class OpenFinanceTransactionMapper
                 WriteOptional(writer, "last4", account.CardLast4);
                 WriteOptional(writer, "billId", transaction.CardBillId);
                 WriteOptional(writer, "issuerCompe", account.IssuerCompe);
-                WriteCardDetails(writer, transaction, installment, dateSource);
+                WriteCardDetails(writer, transaction, installment, billDate);
                 writer.WriteEndObject();
             }
             else if (links?.PaidCard is { } paid)
@@ -443,9 +460,11 @@ public static partial class OpenFinanceTransactionMapper
 
     /// <summary>
     /// The card-line keys added after preview.8, after the earlier ones: <c>paymentType</c>, <c>billPostDate</c>,
-    /// <c>billForecastDate</c>, <c>payeeMcc</c> and, on an installment, <c>installment</c>.
+    /// <c>billForecastDate</c>, <c>payeeMcc</c> and, on an installment, <c>installment</c>. Since #1476 an installment's
+    /// <c>dateSource</c> is always <c>transaction</c> (the event is at the issuer's instant) and the date its bill puts it
+    /// on follows the earlier keys as <c>billDate</c> and <c>billDateSource</c>, when known.
     /// </summary>
-    private static void WriteCardDetails(Utf8JsonWriter writer, OpenFinanceTransaction transaction, OpenFinanceInstallment? installment, string? dateSource)
+    private static void WriteCardDetails(Utf8JsonWriter writer, OpenFinanceTransaction transaction, OpenFinanceInstallment? installment, (DateOnly Date, string Source)? billDate)
     {
         var details = transaction.CardDetails;
         WriteOptional(writer, "paymentType", PaymentType(details));
@@ -465,7 +484,13 @@ public static partial class OpenFinanceTransactionMapper
         if (installment.TotalAmount is { } total && transaction.Foreign is null)
             writer.WriteNumber("totalAmount", total);
         writer.WriteString("source", installment.Source == OpenFinanceInstallmentSource.Metadata ? "metadata" : "description");
-        WriteOptional(writer, "dateSource", dateSource);
+        writer.WriteString("dateSource", TransactionDateSource);
+        if (billDate is { } bill)
+        {
+            writer.WriteString("billDate", IsoDate(bill.Date));
+            writer.WriteString("billDateSource", bill.Source);
+        }
+
         writer.WriteEndObject();
     }
 
@@ -547,7 +572,7 @@ public static class OpenFinanceImportSchemas
             "status": { "const": "posted" },
             "sourceTransactionId": { "type": "string", "description": "The aggregator's own id (also the import ExternalId)" },
             "transactionTime": { "type": "string", "format": "date-time" },
-            "transactionDate": { "type": "string", "format": "date", "description": "Booking date, Brazilian calendar: the date of transactionTime (an installment's event is dated from its bill, see card.installment.dateSource)" },
+            "transactionDate": { "type": "string", "format": "date", "description": "Booking date, Brazilian calendar: the date of transactionTime. A card line's event is dated at transactionTime itself, an installment included (#1476); a deposit line's at midnight in Brazil of this date" },
             "accountKind": { "enum": ["deposit", "creditCard"] },
             "institutionWebsite": { "type": "string", "format": "uri", "description": "Official website of the account's institution, when its COMPE code is in the package's institution list" },
             "type": { "type": "string", "description": "PIX, TED, BOLETO, CARD, OUTROS, ..." },
@@ -568,7 +593,7 @@ public static class OpenFinanceImportSchemas
                 "payeeMcc": { "type": "string", "description": "Card lines: the payee's merchant category code, four digits" },
                 "installment": {
                   "type": "object",
-                  "description": "Card lines that are an installment (parcela) of a purchase or a fee; the event is dated from its bill (see dateSource)",
+                  "description": "Card lines that are an installment (parcela) of a purchase or a fee; the event is dated at the issuer's instant, its bill's date is billDate",
                   "required": ["number", "count", "purchaseDate", "source", "dateSource"],
                   "properties": {
                     "number": { "type": "integer", "minimum": 1 },
@@ -576,7 +601,9 @@ public static class OpenFinanceImportSchemas
                     "purchaseDate": { "type": "string", "format": "date", "description": "The purchase date the source reports, else the line's transactionDate" },
                     "totalAmount": { "type": "number", "description": "The whole purchase's amount, when the source reports it (direct connectors only); never a second movement. Absent on a line in another currency (see foreign), whose total has no documented currency" },
                     "source": { "enum": ["metadata", "description"], "description": "The source's installment fields, or the trailing dd/dd of the description" },
-                    "dateSource": { "enum": ["billPostDate", "bill", "billForecastDate", "purchase"], "description": "What the event's date came from: billPostDate, the named bill's closing date (else its due date), the first day of billForecastDate's month, or the line's own date when none of them is later than purchaseDate" }
+                    "dateSource": { "enum": ["transaction", "billPostDate", "bill", "billForecastDate", "purchase"], "description": "What the event's date came from: transaction (the issuer's instant, transactionTime) since #1476. Up to 1.0.0-preview.11 an installment was dated at billPostDate, the named bill's closing date (else its due date), the first day of billForecastDate's month, or its own date (purchase)" },
+                    "billDate": { "type": "string", "format": "date", "description": "The date the installment's bill puts it on: the first of billPostDate, the named bill's closing date (else its due date) and the first day of billForecastDate's month that is later than purchaseDate; absent when none is" },
+                    "billDateSource": { "enum": ["billPostDate", "bill", "billForecastDate"], "description": "What billDate came from" }
                   }
                 }
               }
