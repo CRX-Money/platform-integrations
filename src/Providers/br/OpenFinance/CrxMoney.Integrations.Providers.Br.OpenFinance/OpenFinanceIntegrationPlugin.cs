@@ -16,8 +16,9 @@ namespace CrxMoney.Integrations.Providers.Br.OpenFinance;
 /// <remarks>
 /// A request with <c>ConnectionId &lt;= 0</c> is a connection test (<see cref="IOpenFinanceSource.CheckConnectionAsync"/>).
 /// A sync asks the source for lines booked from <see cref="OverlapDays"/> before the host's window start
-/// (everything when the host gives no start) and sends those booked from then on, and a card installment also when
-/// its bill is dated from then on (see <see cref="OpenFinanceTransactionMapper.EventDate"/>). The source returns every line of each
+/// (everything when the host gives no start) and sends those booked from then on, a card installment also when
+/// its bill is dated from then on (see <see cref="OpenFinanceTransactionMapper.BillDate"/>), and a posted line the source
+/// stored or changed from then on whatever its date (<see cref="OpenFinanceTransaction.SourceUpdatedAt"/>, #1475). The source returns every line of each
 /// booking date it covers, so key ordinals match a full read. The account balance cannot be checked against
 /// a window of lines; it is reported with its date for the host to compare with its ledger. A card's balance is
 /// reported settled (without its pending lines, but with the pending bill payments it received applied) with the
@@ -195,6 +196,11 @@ public abstract class OpenFinanceIntegrationPlugin
         var sendFrom = SendFrom(request);
         var snapshot = await source.ReadAsync(request, sendFrom, cancellationToken).ConfigureAwait(false);
         bool IsSent(DateOnly date) => sendFrom is not { } from || date >= from;
+        // #1475: a line the source stored or changed from the window's first day is sent whatever its date, so a card
+        // purchase that stayed pending until its bill closed is sent when it posts, however old its date.
+        DateTimeOffset? changedFrom = sendFrom is { } first ? BrazilBankingCalendar.StartOfDay(first) : null;
+        bool ChangedInWindow(OpenFinanceTransaction transaction) =>
+            changedFrom is { } since && transaction.SourceUpdatedAt is { } changed && changed >= since;
 
         // A card's bills by id, so a card line can be dated at the bill it names (installments, #1417).
         var bills = snapshot.Accounts
@@ -210,13 +216,15 @@ public abstract class OpenFinanceIntegrationPlugin
                 : null;
 
         // Every posted line and every investment movement the read returned gets its key first: pairing looks at all
-        // of them, sending only at those in the window. A line is sent when its booking date or the date its event
-        // carries (OpenFinanceTransactionMapper.EventDate: for a card installment, the date of its bill) is in the window,
-        // so installment 2 and later of an older purchase is sent when its bill arrives (#1424) and every line sent before
-        // is still sent. The checkpoint still holds the latest booking date read.
+        // of them, sending only at those in the window. A line is sent when its booking date or, for a card installment,
+        // the date of its bill (OpenFinanceTransactionMapper.BillDate) is in the window, so installment 2 and later of an
+        // older purchase is sent when its bill arrives (#1424) and every line sent before is still sent; or when the
+        // source stored or changed it in the window (#1475: a purchase pending until its bill closed posts with its old
+        // date). The checkpoint still holds the latest booking date read.
         var lines = new List<PreparedLine>();
         DateOnly? latest = null;
         var pending = 0;
+        var sentByChange = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var (account, transactions) in snapshot.Accounts)
         {
             var posted = transactions.Where(t => !t.IsPending).ToList();
@@ -225,10 +233,15 @@ public abstract class OpenFinanceIntegrationPlugin
             {
                 if (latest is null || transaction.BookingDate > latest)
                     latest = transaction.BookingDate;
+                var byDate = IsSent(transaction.BookingDate)
+                    || OpenFinanceTransactionMapper.BillDate(account, transaction, BillOf(account, transaction)) is { } billDate && IsSent(billDate);
+                var byChange = !byDate && ChangedInWindow(transaction);
+                if (byChange)
+                    sentByChange[account.ExternalAccountId] = sentByChange.GetValueOrDefault(account.ExternalAccountId) + 1;
                 lines.Add(new PreparedLine(account, transaction, ordinal,
                     OpenFinanceTransactionMapper.IdempotencyKey(OpenFinanceTransactionMapper.LineIdentity(account, transaction), ordinal),
                     OpenFinanceTransactionMapper.TransferHint(account, transaction),
-                    IsSent(transaction.BookingDate) || IsSent(OpenFinanceTransactionMapper.EventDate(account, transaction, BillOf(account, transaction)))));
+                    byDate || byChange));
             }
         }
 
@@ -338,7 +351,8 @@ public abstract class OpenFinanceIntegrationPlugin
                 writer.WriteString("credentialExpiresAtUtc", expiresAt.ToUniversalTime());
             writer.WriteStartArray("accounts");
             foreach (var accountTransactions in snapshot.Accounts)
-                WriteAccountReport(writer, accountTransactions, sentPerAccount.GetValueOrDefault(accountTransactions.Account.ExternalAccountId));
+                WriteAccountReport(writer, accountTransactions, sentPerAccount.GetValueOrDefault(accountTransactions.Account.ExternalAccountId),
+                    sentByChange.GetValueOrDefault(accountTransactions.Account.ExternalAccountId));
             foreach (var (investment, investmentMovements) in snapshot.Investments)
                 WriteInvestmentReport(writer, investment, investmentMovements.Count, sentPerAccount.GetValueOrDefault(investment.ExternalAccountId));
             writer.WriteEndArray();
@@ -353,6 +367,12 @@ public abstract class OpenFinanceIntegrationPlugin
             writer.WriteNumber("foreignLinesWithoutAccountAmount", foreignLinesWithoutAccountAmount);
             writer.WriteNumber("pendingForeignLinesWithoutAccountAmount", snapshot.Accounts
                 .Sum(a => a.Transactions.Count(t => t.IsPending && t.Foreign is { AccountAmountMissing: true })));
+            // After the earlier keys (#1475): the posted lines sent only because the source stored or changed them from
+            // this instant (their date is before sentFrom), and the oldest date among the pending lines skipped.
+            if (changedFrom is { } since)
+                writer.WriteString("sentChangedFromUtc", since.ToUniversalTime());
+            writer.WriteNumber("sentByChange", sentByChange.Values.Sum());
+            WriteOptionalDate(writer, "pendingOldestDate", OldestPending(snapshot.Accounts.SelectMany(a => a.Transactions)));
             WriteRaw(writer, "sourceDiagnostics", snapshot.DiagnosticsJson);
         });
 
@@ -381,7 +401,7 @@ public abstract class OpenFinanceIntegrationPlugin
     /// includes, except pending bill payments the card has received, which count as applied because the host books
     /// a bill payment from the paying account's debit (<c>pendingBillPayments</c> says how much).
     /// </summary>
-    private static void WriteAccountReport(Utf8JsonWriter writer, OpenFinanceAccountTransactions accountTransactions, int sent)
+    private static void WriteAccountReport(Utf8JsonWriter writer, OpenFinanceAccountTransactions accountTransactions, int sent, int sentByChange)
     {
         var (account, transactions) = accountTransactions;
         var isCard = account.Kind == OpenFinanceAccountKind.CreditCard;
@@ -426,8 +446,17 @@ public abstract class OpenFinanceIntegrationPlugin
         // New keys follow the preview.4 ones (#1386).
         if (isCard && accountTransactions.Bills.Count > 0)
             WriteBills(writer, accountTransactions.Bills, transactions);
+        // After the earlier keys (#1475): the account's pending lines skipped (never imported), the oldest date among
+        // them, and its posted lines sent only because the source stored or changed them in the window.
+        writer.WriteNumber("pendingSkipped", transactions.Count(t => t.IsPending));
+        WriteOptionalDate(writer, "pendingOldestDate", OldestPending(transactions));
+        writer.WriteNumber("sentByChange", sentByChange);
         writer.WriteEndObject();
     }
+
+    /// <summary>The oldest booking date among the pending lines, or null when there is none.</summary>
+    private static DateOnly? OldestPending(IEnumerable<OpenFinanceTransaction> transactions) =>
+        transactions.Where(t => t.IsPending).Select(t => (DateOnly?)t.BookingDate).Min();
 
     /// <summary>
     /// A card's <c>bills</c> (#1386), oldest due date first: the issuer's numbers for each closed cycle, so the host can

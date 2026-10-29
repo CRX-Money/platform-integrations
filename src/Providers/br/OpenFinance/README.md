@@ -30,6 +30,94 @@ has exactly one adapter, that adapter runs.
 | --- | --- | --- | --- |
 | Pluggy | `Pluggy` (`PluggyAdapter.Name`) | `.AddPluggy()` | `Pluggy/`, namespace `CrxMoney.Integrations.Providers.Br.OpenFinance.Pluggy` |
 
+## Changes after 1.0.0-preview.11
+
+- **Card lines are dated at the issuer's instant, installments included (#1476).**
+  Up to preview.11 every card event was dated at midnight in Brazil of its booking date
+  (`OccurredAtUtc = 2026-03-14T00:00-03:00`), and since preview.9 an installment at the
+  date of its bill (`card.installment.dateSource` `billPostDate`, `bill` or
+  `billForecastDate`), so installment 2 of 6 of a purchase made on 14 March sat on the
+  due date of a bill months later. Now every card line's event is dated at
+  `transactionTime` itself, the issuer's instant (Pluggy's
+  `creditCardMetadata.transactionDateTime`, else its `date`), expressed with Brazil's
+  offset: `2025-03-14T15:09:26Z` becomes `2025-03-14T12:09:26-03:00`. For installment
+  k >= 2 the issuer reports the purchase instant, so every installment of a purchase
+  carries the purchase's date and time. The bill stays a fact of the line:
+  `card.billId`, `card.billPostDate`, `card.billForecastDate` as before, and two new
+  keys after the earlier ones inside `card.installment`:
+
+  | Key | Value |
+  | --- | --- |
+  | `card.installment.dateSource` | always `transaction` now (the enum keeps the older values for lines stored by earlier versions) |
+  | `card.installment.billDate` | `yyyy-mm-dd`: the date the installment's bill puts it on, by the former dating rule (the first of `billPostDate`, the named bill's closing date, else its due date, and the first day of `billForecastDate`'s month that is later than the purchase date); absent when none is |
+  | `card.installment.billDateSource` | `billPostDate`, `bill` or `billForecastDate`: what `billDate` came from |
+
+  Deposit lines are unchanged: still at midnight in Brazil of their booking date.
+
+  **No key changes.** The line identity has always hashed the instant to the second,
+  never the event's date, so every line keeps its key and ordinal byte for byte. A
+  windowed read still sends an installment when its bill date is in the window
+  (`OpenFinanceTransactionMapper.BillDate`), so installment 2 and later of an older
+  purchase, which carries the purchase instant, is still sent when its bill arrives.
+
+  **Host.** Every card line the host already holds now arrives under its key with
+  another date: the instant instead of midnight, and for an installment the purchase
+  instead of a bill. A host that compares dates to decide a line changed sees each one
+  as changed; it should re-date its stored lines in place once (CRX•Money: from the
+  instant already in each stored line's `transactionTime`, #1476) and keep a line's
+  first instant afterwards, since an aggregator can report another instant for the same
+  line (Pluggy shifts `transactionDateTime` by three hours between some reads, which
+  changes the key; the host's re-key by line id handles it). A host that books
+  something at an installment's bill (CRX•Money unwinds each installment of a derived
+  purchase at its bill) reads `card.installment.billDate`. In the model:
+  `OpenFinanceTransactionMapper.EventTime` (new) gives the event's instant,
+  `OpenFinanceTransactionMapper.BillDate` (new) an installment's bill date, and
+  `EventDate` now returns the booking date for every line, ignores its `bill`
+  argument and is marked `[Obsolete]` (use `EventTime` or `BillDate`).
+
+- **A purchase that posts long after its date is sent when it posts (#1475).**
+  A card purchase stays `PENDING` at Pluggy until its bill closes; the plugin never
+  imports a pending line. At the closing Pluggy turns it `POSTED` under the same id,
+  with its `date`, `transactionDateTime` and `createdAt` unchanged and `updatedAt` at
+  the closing. Up to preview.11 a windowed read sent a posted line only when its booking
+  date (or its bill date) was in the window, so the purchases of a cycle older than the
+  window (a week of overlap before the host's start) never reached the host: a full read
+  done while they were pending skipped them, and no later windowed read sent them. Now a
+  posted line is also sent when the source stored or changed it from the first day the
+  read sends (`sentFrom`, at midnight in Brazil), whatever its date:
+  `OpenFinanceTransaction.SourceUpdatedAt` (new, optional), which the Pluggy adapter
+  fills with the later of `createdAt` and `updatedAt`. Pluggy documents a
+  `createdAtFrom` filter but no `updatedAtFrom`
+  ([reference](https://docs.pluggy.ai/reference/transactions-list-by-cursor)), so the
+  test is made on the lines the read already holds: a card is read from 62 days before the
+  window's first day (since this change anchored on the window, not on today, so a sync
+  that comes long after the last success, after a consent lapse or an idle item, still
+  holds the purchases that were pending then), which covers the cycle of an open bill.
+  An adapter that does not know
+  when its aggregator changed a line leaves `SourceUpdatedAt` null and its lines are sent
+  by their dates as before. The rule is generic: a deposit line the source posts late is
+  sent the same way when its read holds it.
+
+  **Keys and ordinals.** No key changes. A line sent this way is in the date read, which
+  holds every line of each date it covers, so it is numbered as in a full read. Lines the
+  aggregator touches for other reasons are sent again: Pluggy moves `updatedAt` when it
+  refreshes a line's category or other enrichment, and when it reports the line's instant
+  three hours off (a drift, which changes the key). The host sees them again: a known key
+  is compared by its replay planner (enrichment is refreshed in place), a drifted key goes
+  through its re-key by line id. A line only the `createdAtFrom` read holds (dated before
+  the card's read date) takes its ordinal from the lines of its day that read holds, which
+  may be part of the day: two identical lines of that day, one of them outside the read,
+  could swap ordinals (rare; the #1426 note below).
+
+  **Diagnostics**, after the earlier keys. Run level: `sentChangedFromUtc` (the instant a
+  line's change is compared with, absent on a full read), `sentByChange` (posted lines
+  sent only because they changed in the window) and `pendingOldestDate` (the oldest
+  booking date among the pending lines skipped). Each `accounts` row of a deposit
+  account or card: `pendingSkipped` (its pending lines, never imported),
+  `pendingOldestDate` (when it has any) and `sentByChange`.
+  Code: `OpenFinanceIntegrationPlugin` (`ReadAsync`, `WriteAccountReport`),
+  `PluggyOpenFinanceSource.NormalizeTransaction`.
+
 ## Changes after 1.0.0-preview.10
 
 - **A line made in another currency carries the amount in the account's currency (#1440).**
@@ -112,7 +200,7 @@ has exactly one adapter, that adapter runs.
   received those lines; only a full-history sync did (the known gap #1424 left). On a
   windowed sync the Pluggy adapter now reads each credit card twice: by `dateFrom` as
   before, and by `createdAtFrom` (when Pluggy stored the line) from the same date, the
-  card's read date (`cardTransactionsDateFrom`, at least 62 days before today), at
+  card's read date (`cardTransactionsDateFrom`, at least 62 days before today; since preview.12, 62 days before the window), at
   00:00:00.000Z. Pluggy takes no `dateFrom` together with `createdAtFrom`
   ([reference](https://docs.pluggy.ai/reference/transactions-list-by-cursor)), so it is
   a read of its own, paged by its own cursor. The lines only the second read returns
@@ -298,7 +386,8 @@ has exactly one adapter, that adapter runs.
   item (a reconnect issues new transaction ids), are not re-keyed and come in as new
   items.
   Code: `OpenFinanceTransactionMapper.LineIdentity`, and the plugin's send test,
-  which uses `OpenFinanceTransactionMapper.EventDate`.
+  which uses `OpenFinanceTransactionMapper.EventDate` (since #1476 `BillDate`, see the
+  changes after preview.11).
 
 - **Installments on card lines (#1417).** A card line now says whether it is an
   installment (parcela) of a purchase or a fee, and an installment's event is dated
@@ -332,7 +421,9 @@ has exactly one adapter, that adapter runs.
   first, see "The suffix" above), with the same bounds, and says
   `source: "description"`.
 
-  **Dating rule.** An installment's event (`OccurredAtUtc`) is dated from its bill,
+  **Dating rule** (up to preview.11; since #1476 the event is at the issuer's instant and
+  this rule gives `card.installment.billDate`, see the changes after preview.11). An
+  installment's event (`OccurredAtUtc`) is dated from its bill,
   so the books follow the invoice and a past month stops growing when a later
   installment arrives. The first of these that is **later than the purchase date**
   wins, and `dateSource` says which:
@@ -471,8 +562,10 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   becomes the import's `ExternalId` and is kept in provider data, but never in the
   key. Switching aggregators on an existing connection therefore imports nothing
   twice. The recipe is part of the package's released behaviour (`docs/versioning.md`).
-- **Dates**: booking date in Brazil's calendar at midnight São Paulo; a card
-  installment is dated from its bill (see the changes after preview.8).
+- **Dates**: a card line, an installment included, at the issuer's instant
+  (`transactionTime`) with Brazil's offset, its bill a fact of the line
+  (`card.installment.billDate`; see the changes after preview.11); a deposit line at
+  midnight São Paulo of its booking date.
 - **Provider data** (schemas `br.openfinance.transaction.deposit`/`.withdrawal` v1):
   `provider` (the aggregator), `channel: "openfinance"`, type and detail,
   description, `counterparty` (name, `taxId` + `taxIdKind` + `taxIdCountry`,
@@ -537,7 +630,9 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   when the host gives no start) and sends those booked from then on, and a card
   installment also when its bill is dated from then on (#1424), so a later
   installment of an older purchase is sent when its bill arrives (an adapter must then
-  return it: the Pluggy adapter reads cards by creation date as well, #1426). A source must
+  return it: the Pluggy adapter reads cards by creation date as well, #1426), and any
+  posted line the source stored or changed from then on (`SourceUpdatedAt`, #1475), so a
+  purchase that stayed pending until its bill closed is sent when it posts. A source must
   return every line of each booking date it covers, so lines that differ only by
   ordinal are numbered as in a full read and keep their keys. Investment movements follow the
   same rule: the source returns all of them and the plugin sends those booked from
@@ -555,7 +650,8 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   `foreignLinesWithoutAccountAmount` and `pendingForeignLinesWithoutAccountAmount` (after
   preview.10: sent lines made in another currency, those of them sent with the original
   amount because the source gave no amount in the account's currency, and pending lines in
-  that case) and `sourceDiagnostics`.
+  that case), `sentChangedFromUtc`, `sentByChange` and `pendingOldestDate` (after
+  preview.11, #1475) and `sourceDiagnostics`.
 
   `connector` (also on a connection test) is the connector the item reads through, when the plugin can tell:
   `id` (the aggregator's), `name`, `isBusiness`, `iconUrl` (when the aggregator gave one) and
@@ -661,8 +757,9 @@ accounts needs Pluggy's commercial plan or another aggregator.
   calendar. A full-history sync (no window start) sends no `dateFrom`. Each
   response's `next` (`?accountId=…&after=…`) is reduced to its `after` cursor and
   the next page is requested with the same account and `dateFrom`, always on the
-  Pluggy host. **Cards** are read from at least 62 days before today
-  (`cardTransactionsDateFrom` in the diagnostics), so every pending purchase of the
+  Pluggy host. **Cards** are read from 62 days before the window's first day
+  (`cardTransactionsDateFrom` in the diagnostics; up to preview.11, at least 62 days
+  before today), so every pending purchase of the
   open bill is in the read; see "Card balances" below. An installment line's `date`
   is usually its bill post date, so the window catches installment 2 and later of an
   older purchase when its bill arrives. The tail of a long series is the exception:
@@ -744,8 +841,8 @@ Limits of the split:
   parcelado purchase against the limit, but post one instalment per bill. The
   future instalments are in the used limit and are neither posted nor pending
   lines, so `balance` is higher than the posted lines by those instalments.
-- **Pending lines older than 62 days** (a bill that closes very late) would be
-  missed and counted as settled.
+- **Pending lines older than 62 days before the window** (a bill that closes very late)
+  would be missed and counted as settled.
 - **Shared limits.** Additional cards and disaggregated credit lines
   (`creditData.disaggregatedCreditLimits`) can share one limit; the adapter uses the
   account's own `balance` and does not combine lines.
@@ -811,7 +908,7 @@ Normalisation into the Open Finance model:
   imported by the daily sync when Pluggy reports it with its bill post date as
   `date`, with the key any other read gives it. Since #1426 the tail of a long
   series, whose `date` is the purchase date, is read too, by `createdAtFrom`. A tail
-  installment Pluggy stored before the card's read date (62 days before today) and
+  installment Pluggy stored before the card's read date (62 days before the window) and
   whose bill is dated later still needs a full-history sync, which imports nothing
   twice after the host migration (changes after preview.8).
 - No link between account lines and investment movements, and no card id on the

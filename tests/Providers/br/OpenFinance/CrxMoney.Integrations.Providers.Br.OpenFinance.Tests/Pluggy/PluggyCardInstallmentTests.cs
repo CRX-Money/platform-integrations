@@ -12,8 +12,9 @@ namespace CrxMoney.Integrations.Providers.Br.OpenFinance.Tests.Pluggy;
 
 /// <summary>
 /// Installments (parcelas) on card lines (#1417): Pluggy's <c>creditCardMetadata</c> installment fields become
-/// <c>card.installment</c> and the other <c>card</c> keys, and each installment is dated from its bill. Since #1424 an
-/// installment's line identity carries its number and count, so the installments of one purchase never share a key
+/// <c>card.installment</c> and the other <c>card</c> keys. Since #1476 each installment is dated at the issuer's instant
+/// (the purchase's, for k &gt;= 2) and its bill's date is a fact of the line (<c>card.installment.billDate</c>). Since #1424
+/// an installment's line identity carries its number and count, so the installments of one purchase never share a key
 /// identity, and a windowed read sends an installment by its bill's date. Every line of <c>transactions-card-installments.json</c> is synthetic, in the shape Pluggy sends
 /// for k &gt;= 2: <c>date</c> is the bill post date at 03:00Z while <c>transactionDateTime</c> and <c>purchaseDate</c>
 /// are the purchase instant.
@@ -54,6 +55,8 @@ public sealed class PluggyCardInstallmentTests
 
     private static string? Text(JsonNode? node) => node?.GetValue<string>();
 
+    private static string? BillDate(IntegrationImportEvent e) => Text(Card(e)["installment"]?["billDate"]);
+
     /// <summary>A posted card debit booked on 2026-03-02 in Brazil.</summary>
     private static OpenFinanceTransaction CardLine(OpenFinanceCardLineDetails details, string? description, string? billId = null) =>
         new("t", new DateTimeOffset(2026, 3, 2, 19, 10, 0, TimeSpan.Zero), OpenFinanceDirection.Debit, 10m,
@@ -63,7 +66,7 @@ public sealed class PluggyCardInstallmentTests
         };
 
     [Fact]
-    public async Task An_open_finance_installment_carries_its_installment_and_is_dated_at_its_bill_post_date()
+    public async Task An_open_finance_installment_carries_its_installment_and_is_dated_at_the_purchase_instant()
     {
         var e = (await CardEventsAsync(InstallmentLines()))["f01"];
         var card = Card(e);
@@ -80,16 +83,20 @@ public sealed class PluggyCardInstallmentTests
         Assert.Equal("5712", Text(card["payeeMcc"]));
 
         var installment = card["installment"]!;
-        Assert.Equal(["number", "count", "purchaseDate", "source", "dateSource"], installment.AsObject().Select(p => p.Key));
+        Assert.Equal(["number", "count", "purchaseDate", "source", "dateSource", "billDate", "billDateSource"], installment.AsObject().Select(p => p.Key));
         Assert.Equal(1, installment["number"]!.GetValue<int>());
         Assert.Equal(6, installment["count"]!.GetValue<int>());
         Assert.Equal("2025-03-14", Text(installment["purchaseDate"]));
         Assert.Null(installment["totalAmount"]); // Open Finance reports no total
         Assert.Equal("metadata", Text(installment["source"]));
-        Assert.Equal("billPostDate", Text(installment["dateSource"]));
+        Assert.Equal("transaction", Text(installment["dateSource"]));
+        Assert.Equal("2025-03-15", Text(installment["billDate"]));
+        Assert.Equal("billPostDate", Text(installment["billDateSource"]));
 
-        // Dated at the bill post date; transactionTime and transactionDate still say when the bank dated the line.
-        Assert.Equal("2025-03-15", Date(e));
+        // #1476: dated at the issuer's instant, with Brazil's offset; the bill post date is a fact of the line.
+        Assert.Equal(new DateTimeOffset(2025, 3, 14, 12, 9, 26, TimeSpan.FromHours(-3)), e.OccurredAtUtc);
+        Assert.Equal(TimeSpan.FromHours(-3), e.OccurredAtUtc.Offset);
+        Assert.Equal("2025-03-14", Date(e));
         var data = JsonNode.Parse(e.ProviderData!)!;
         Assert.Equal("2025-03-14", Text(data["transactionDate"]));
         Assert.Equal("LOJA EXEMPLO*DECOR01/06", Text(data["description"]));
@@ -106,8 +113,10 @@ public sealed class PluggyCardInstallmentTests
         const string purchase = $"{CardAccountKey}|2025-03-14T15:09:26Z|D|41.37";
         Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{purchase}|1/6", 0), events["f01"].IdempotencyKey);
         Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{purchase}|2/6", 0), events["f10"].IdempotencyKey);
-        Assert.Equal("2025-03-17", Date(events["f10"]));
-        Assert.Equal("billPostDate", Text(Card(events["f10"])["installment"]!["dateSource"]));
+        Assert.Equal("2025-03-14", Date(events["f10"])); // the purchase instant, as 01/06
+        Assert.Equal(events["f01"].OccurredAtUtc, events["f10"].OccurredAtUtc);
+        Assert.Equal("2025-03-17", BillDate(events["f10"]));
+        Assert.Equal("billPostDate", Text(Card(events["f10"])["installment"]!["billDateSource"]));
 
         // A suffix read from the description gives the same identity as the source's number and count would.
         Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2025-06-17T13:05:00Z|D|287.45|10/12", 0), events["f06"].IdempotencyKey);
@@ -127,7 +136,8 @@ public sealed class PluggyCardInstallmentTests
         Assert.Equal("metadata", Text(installment["source"]));
         Assert.Equal("0742", Text(card["payeeMcc"])); // a string MCC, padded to four digits
         Assert.Equal("2026-09-14", Text(card["billPostDate"])); // a date sent as a date-time keeps its date
-        Assert.Equal("2026-09-14", Date(e));
+        Assert.Equal("2026-09-14", BillDate(e));
+        Assert.Equal("2026-08-14", Date(e));
         Assert.Equal(200m, e.Amount);
     }
 
@@ -157,7 +167,8 @@ public sealed class PluggyCardInstallmentTests
         Assert.Equal("2025-12-01", Text(installment["purchaseDate"])); // no purchaseDate: the line's own date
         Assert.Equal("metadata", Text(installment["source"]));
         Assert.Null(Card(withMetadata)["paymentType"]);
-        Assert.Equal("2026-03-28", Date(withMetadata));
+        Assert.Equal("2026-03-28", BillDate(withMetadata));
+        Assert.Equal("2025-12-01", Date(withMetadata));
 
         // The same fee without the metadata: "ANUIDADE DIFERENCI05/10" is read from the description.
         var fromDescription = events["f07"];
@@ -165,13 +176,13 @@ public sealed class PluggyCardInstallmentTests
         Assert.Equal(5, installment["number"]!.GetValue<int>());
         Assert.Equal(10, installment["count"]!.GetValue<int>());
         Assert.Equal("description", Text(installment["source"]));
-        Assert.Equal("2026-04-28", Date(fromDescription));
+        Assert.Equal("2026-04-28", BillDate(fromDescription));
     }
 
     [Theory]
     [InlineData("f05", 1, 2, "2026-07-18", "2026-07-20")]    // "TINTAS EXEMPLO 01/02": spaced
     [InlineData("f06", 10, 12, "2025-06-17", "2026-10-02")]  // "EC *EXEMPLOINFORMAT10/12": compact
-    public async Task Without_metadata_the_description_suffix_gives_the_installment(string id, int number, int count, string purchaseDate, string eventDate)
+    public async Task Without_metadata_the_description_suffix_gives_the_installment(string id, int number, int count, string purchaseDate, string billDate)
     {
         var e = (await CardEventsAsync(InstallmentLines()))[id];
         var installment = Card(e)["installment"]!;
@@ -180,8 +191,10 @@ public sealed class PluggyCardInstallmentTests
         Assert.Equal(count, installment["count"]!.GetValue<int>());
         Assert.Equal(purchaseDate, Text(installment["purchaseDate"]));
         Assert.Equal("description", Text(installment["source"]));
-        Assert.Equal("billPostDate", Text(installment["dateSource"]));
-        Assert.Equal(eventDate, Date(e));
+        Assert.Equal("transaction", Text(installment["dateSource"]));
+        Assert.Equal("billPostDate", Text(installment["billDateSource"]));
+        Assert.Equal(billDate, BillDate(e));
+        Assert.Equal(Text(JsonNode.Parse(e.ProviderData!)!["transactionDate"]), Date(e));
     }
 
     /// <summary>
@@ -191,7 +204,7 @@ public sealed class PluggyCardInstallmentTests
     [Theory]
     [InlineData("f13", 1, 3, "2026-09-19", "2026-09-21", "63.20")]   // "MERCADO TESTE01/03CIDADE EXEMPLOBR": compact
     [InlineData("f14", 3, 10, "2026-07-08", "2026-09-22", "129.90")] // "LOJA EXEMPLO MODA 03/10      CIDADE EXEMPLO  BR": padded
-    public async Task A_location_after_the_suffix_is_cut_before_the_suffix_is_read(string id, int number, int count, string purchaseDate, string eventDate, string amount)
+    public async Task A_location_after_the_suffix_is_cut_before_the_suffix_is_read(string id, int number, int count, string purchaseDate, string billDate, string amount)
     {
         var e = (await CardEventsAsync(InstallmentLines()))[id];
         var installment = Card(e)["installment"]!;
@@ -200,8 +213,8 @@ public sealed class PluggyCardInstallmentTests
         Assert.Equal(count, installment["count"]!.GetValue<int>());
         Assert.Equal(purchaseDate, Text(installment["purchaseDate"]));
         Assert.Equal("description", Text(installment["source"]));
-        Assert.Equal("billPostDate", Text(installment["dateSource"]));
-        Assert.Equal(eventDate, Date(e));
+        Assert.Equal("transaction", Text(installment["dateSource"]));
+        Assert.Equal(billDate, BillDate(e));
 
         // The installment identity: the number and count join the line identity.
         var time = DateTimeOffset.Parse(Text(JsonNode.Parse(e.ProviderData!)!["transactionTime"])!, CultureInfo.InvariantCulture).ToUniversalTime();
@@ -224,19 +237,23 @@ public sealed class PluggyCardInstallmentTests
     }
 
     [Theory]
-    // The tail of a long series: billPostDate equals the purchase date, so the bill dates the line.
+    // The tail of a long series: billPostDate equals the purchase date, so the bill gives the bill date.
     [InlineData("f09", "bill", "2026-09-01")]               // bill e0, read with its closing date
     [InlineData("f11", "bill", "2026-10-10")]               // bill e1 has no closing date: its due date
     [InlineData("f12", "billForecastDate", "2026-08-01")]   // a bill the read did not list: billForecastDate's month
-    [InlineData("f08", "purchase", "2026-08-12")]           // on no bill yet (placeholder billPostDate, no bill, no forecast)
-    public async Task An_installment_without_a_later_bill_post_date_is_dated_from_its_bill(string id, string dateSource, string eventDate)
+    [InlineData("f08", null, null)]                         // on no bill yet (placeholder billPostDate, no bill, no forecast)
+    public async Task An_installment_without_a_later_bill_post_date_takes_its_bill_date_from_its_bill(string id, string? billDateSource, string? billDate)
     {
         var e = (await CardEventsAsync(InstallmentLines()))[id];
         var installment = Card(e)["installment"]!;
 
-        Assert.Equal(dateSource, Text(installment["dateSource"]));
-        Assert.Equal(eventDate, Date(e));
-        Assert.True(string.CompareOrdinal(eventDate, Text(installment["purchaseDate"])) >= 0); // never before the purchase
+        Assert.Equal("transaction", Text(installment["dateSource"]));
+        Assert.Equal(billDateSource, Text(installment["billDateSource"]));
+        Assert.Equal(billDate, BillDate(e));
+        if (billDate is not null)
+            Assert.True(string.CompareOrdinal(billDate, Text(installment["purchaseDate"])) > 0); // always after the purchase
+        // #1476: the event is at the issuer's instant, whatever the bill.
+        Assert.Equal(Text(JsonNode.Parse(e.ProviderData!)!["transactionDate"]), Date(e));
     }
 
     [Fact]
@@ -259,10 +276,12 @@ public sealed class PluggyCardInstallmentTests
         var withBill = (await CardEventsAsync(dated))["f01"];
         var withoutBill = (await CardEventsAsync(undated))["f01"];
 
-        Assert.Equal("2025-03-15", Date(withBill));
-        Assert.Equal("2025-03-14", Date(withoutBill));
-        Assert.Equal("purchase", Text(Card(withoutBill)["installment"]!["dateSource"]));
-        // The bill dates move the event, never the key: it comes from the instant, amount, number and count.
+        Assert.Equal("2025-03-15", BillDate(withBill));
+        Assert.Null(BillDate(withoutBill));
+        Assert.Equal(withoutBill.OccurredAtUtc, withBill.OccurredAtUtc); // #1476: the bill never moves the event
+        Assert.Equal("2025-03-14", Date(withBill));
+        Assert.Equal("transaction", Text(Card(withoutBill)["installment"]!["dateSource"]));
+        // Neither the bill dates nor the event's date change the key: it comes from the instant, amount, number and count.
         Assert.Equal(withoutBill.IdempotencyKey, withBill.IdempotencyKey);
         Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2025-03-14T15:09:26Z|D|41.37|1/6", 0), withBill.IdempotencyKey);
     }
@@ -410,9 +429,9 @@ public sealed class PluggyCardInstallmentTests
     /// <summary>
     /// Story #1424. Installment 02/06 of a purchase made a year earlier reaches Pluggy with its bill post date as
     /// <c>date</c>, inside an incremental read, while <c>transactionDateTime</c> is still the purchase instant. The plugin
-    /// sends it by its event's date (the bill post date, 2026-10-14: later than every bank line of the read), once, with
-    /// the key a full read gives it, although the windowed read does not hold installment 01/06. The checkpoint still goes
-    /// by the booking date.
+    /// sends it by its bill date (the bill post date, 2026-10-14: later than every bank line of the read), once, with
+    /// the key a full read gives it, although the windowed read does not hold installment 01/06; since #1476 it is dated at
+    /// the purchase instant. The checkpoint still goes by the booking date.
     /// </summary>
     [Fact]
     public async Task An_installment_of_an_older_purchase_is_sent_once_on_an_incremental_read()
@@ -434,7 +453,8 @@ public sealed class PluggyCardInstallmentTests
         Assert.Equal(1, row["sent"]!.GetValue<int>());
         var sent = Assert.Single(incremental.ImportEvents, e => e.ExternalAccountId == CardAccountKey);
         Assert.Equal(full["f10"].IdempotencyKey, sent.IdempotencyKey);
-        Assert.Equal("2026-10-14", Date(sent));
+        Assert.Equal("2025-03-14", Date(sent));
+        Assert.Equal("2026-10-14", BillDate(sent));
         // The next day's overlapping read sends it again with the same key, which the host already holds.
         Assert.Equal(sent.IdempotencyKey, Assert.Single(nextDay.ImportEvents, e => e.ExternalAccountId == CardAccountKey).IdempotencyKey);
 
@@ -471,10 +491,11 @@ public sealed class PluggyCardInstallmentTests
         var full = CardEvents(await SyncAsync(new JsonArray(line.DeepClone())));
         var sent = CardEvents(incremental)["a11"];
         Assert.Equal(full["a11"].IdempotencyKey, sent.IdempotencyKey);
-        Assert.Equal("2026-10-10", Date(sent));
-        Assert.Equal("bill", Text(Card(sent)["installment"]!["dateSource"]));
+        Assert.Equal("2025-06-17", Date(sent));
+        Assert.Equal("2026-10-10", BillDate(sent));
+        Assert.Equal("bill", Text(Card(sent)["installment"]!["billDateSource"]));
 
-        // Stored before the card's read date (62 days before today): no read holds it, as before #1426.
+        // Stored before the card's read date (62 days before the window's read date, 3 Aug): no read holds it, as before #1426.
         line["createdAt"] = "2026-08-01T06:00:00.000Z";
         var stale = await SyncAsync(new JsonArray(line.DeepClone()), windowStart);
         Assert.Empty(CardEvents(stale));
@@ -516,7 +537,7 @@ public sealed class PluggyCardInstallmentTests
         var source = JsonNode.Parse(result.ProviderDiagnosticsJson!)!["sourceDiagnostics"]!;
         Assert.Equal(1, source["cardsWithoutCreatedAtRead"]!.GetValue<int>());
         Assert.Equal(0, source["cardLinesByCreatedAt"]!.GetValue<int>());
-        Assert.Equal("2026-08-13T00:00:00.000Z", Text(source["cardTransactionsCreatedAtFrom"]));
+        Assert.Equal("2026-07-17T00:00:00.000Z", Text(source["cardTransactionsCreatedAtFrom"]));
     }
 
     /// <summary>
@@ -533,7 +554,7 @@ public sealed class PluggyCardInstallmentTests
         tail["createdAt"] = "2026-10-13T06:00:00.000Z";
         tail["creditCardMetadata"]!["billId"] = "00000000-0000-4000-8000-0000000000e1";
         lines.Add(tail);
-        // Sent from 2026-09-18; the card is read from 2026-08-13 (62 days before today), by date and by createdAt.
+        // Sent from 2026-09-18; the card is read from 2026-07-17 (62 days before the read date, #1475), by date and by createdAt.
         var windowStart = new DateTimeOffset(2026, 9, 25, 12, 0, 0, TimeSpan.Zero);
 
         var server = FakePluggyServer.WithFixtures();
@@ -549,14 +570,15 @@ public sealed class PluggyCardInstallmentTests
         Assert.Equal(events.Count, events.Select(e => e.ExternalId).Distinct().Count()); // no line twice
         Assert.Equal(events.Count, events.Select(e => e.IdempotencyKey).Distinct().Count());
         // Every line the date read sends is sent as before, with the same key. Added: the tail installments only the
-        // createdAt read holds whose bill is in the window (09/12 and 11/12 of the series, both on the bill due 2026-10-10).
+        // createdAt read holds whose bill is in the window (09/12 and 11/12 of the series, both on the bill due 2026-10-10),
+        // and, since #1475, every other line, because Pluggy stored it on 2026-10-13, inside the window.
         Assert.Equal(["f06", "f13", "f14", "f15", "f16"], baseline.Keys.Order(StringComparer.Ordinal));
         var byId = events.ToDictionary(e => e.ExternalId[^3..], StringComparer.Ordinal);
         foreach (var (id, e) in baseline)
             Assert.Equal(e.IdempotencyKey, byId[id].IdempotencyKey);
-        Assert.Equal(["a11", "f06", "f11", "f13", "f14", "f15", "f16"], byId.Keys.Order(StringComparer.Ordinal));
-        Assert.Equal("2026-10-10", Date(byId["a11"]));
-        Assert.Equal("2026-10-10", Date(byId["f11"]));
+        Assert.Equal(lines.Count, byId.Count);
+        Assert.Equal("2026-10-10", BillDate(byId["a11"]));
+        Assert.Equal("2026-10-10", BillDate(byId["f11"]));
 
         // The createdAt read pages with its own cursor and window: every line, three a page.
         var cardRequests = server.TransactionRequests(FakePluggyServer.CardAccountId);
@@ -565,7 +587,7 @@ public sealed class PluggyCardInstallmentTests
         Assert.All(createdAtPages, r => Assert.Null(r.Query("dateFrom")));
         Assert.Null(createdAtPages[0].Query("after"));
         Assert.All(createdAtPages.Skip(1), r => Assert.NotNull(r.Query("after")));
-        var dateReadLines = DateReadLines(lines, new DateOnly(2026, 8, 13));
+        var dateReadLines = DateReadLines(lines, new DateOnly(2026, 7, 17));
         Assert.Equal((dateReadLines + 2) / 3, cardRequests.Count(r => r.Query("createdAtFrom") is null));
         var source = JsonNode.Parse(result.ProviderDiagnosticsJson!)!["sourceDiagnostics"]!;
         Assert.Equal(server.RequestsTo("/v2/transactions").Count, source["transactionPages"]!.GetValue<int>());
@@ -640,15 +662,15 @@ public sealed class PluggyCardInstallmentTests
     [Theory]
     // Booked on 2026-03-02 (the purchase), installment 5 of 6, on bill "bill-1".
     [InlineData("2026-03-02", "2026-04-02", null, null, null, "2026-04-02")]                 // billPostDate later than the purchase
-    [InlineData(null, "2026-02-27", null, null, null, "2026-03-02")]                         // bad data: never dated back before the purchase
+    [InlineData(null, "2026-02-27", null, null, null, null)]                                 // bad data: never a bill date before the purchase
     [InlineData("0001-01-01", "2026-04-02", null, null, null, "2026-04-02")]                 // placeholder purchaseDate: the booking date is the purchase
-    [InlineData("0001-01-01", "2026-02-27", null, null, null, "2026-03-02")]
-    [InlineData(null, "2026-03-02", "2026-03-01", "2026-03-10", null, "2026-03-02")]         // a bill closing before the purchase, no forecast: keeps its date
+    [InlineData("0001-01-01", "2026-02-27", null, null, null, null)]
+    [InlineData(null, "2026-03-02", "2026-03-01", "2026-03-10", null, null)]                 // a bill closing before the purchase, no forecast: none
     [InlineData(null, "2026-03-02", "2026-03-01", "2026-03-10", "2026-04-10", "2026-04-01")] // ... then billForecastDate's month
     [InlineData(null, "2026-03-02", "2026-03-28", "2026-04-10", null, "2026-03-28")]         // the bill's closing date
     [InlineData(null, "2026-03-02", null, "2026-04-10", null, "2026-04-10")]                 // a bill without closing date: its due date
-    [InlineData(null, "0001-01-01", null, null, "2026-03-10", "2026-03-02")]                 // forecast month starts before the purchase: keeps its date
-    public void An_installment_is_never_dated_before_its_purchase(string? purchaseDate, string? billPostDate, string? billClose, string? billDue, string? forecast, string expected)
+    [InlineData(null, "0001-01-01", null, null, "2026-03-10", null)]                         // forecast month starts before the purchase: none
+    public void An_installment_bill_date_is_never_before_its_purchase(string? purchaseDate, string? billPostDate, string? billClose, string? billDue, string? forecast, string? expected)
     {
         static DateOnly? D(string? value) => value is null ? null : DateOnly.ParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture);
         var line = CardLine(new OpenFinanceCardLineDetails
@@ -662,7 +684,12 @@ public sealed class PluggyCardInstallmentTests
         }, "LOJA EXEMPLO 05/06", billId: "bill-1");
         var bill = billClose is null && billDue is null ? null : new OpenFinanceCardBill("bill-1", D(billDue), 100m, CloseDate: D(billClose));
 
-        Assert.Equal(D(expected), OpenFinanceTransactionMapper.EventDate(Card1234, line, bill));
+        Assert.Equal(D(expected), OpenFinanceTransactionMapper.BillDate(Card1234, line, bill));
+        // #1476: the event's date is the booking date whatever the bill, and its instant the issuer's.
+#pragma warning disable CS0618 // EventDate is obsolete since #1476; its behaviour stays pinned until it is removed.
+        Assert.Equal(new DateOnly(2026, 3, 2), OpenFinanceTransactionMapper.EventDate(Card1234, line, bill));
+#pragma warning restore CS0618
+        Assert.Equal(line.TransactionTime, OpenFinanceTransactionMapper.EventTime(Card1234, line));
     }
 
     [Fact]
@@ -671,7 +698,7 @@ public sealed class PluggyCardInstallmentTests
         var line = CardLine(new OpenFinanceCardLineDetails { InstallmentNumber = 5, InstallmentCount = 6 }, null, billId: "bill-2");
         var other = new OpenFinanceCardBill("bill-1", new DateOnly(2026, 4, 10), 100m, CloseDate: new DateOnly(2026, 4, 1));
 
-        Assert.Equal(new DateOnly(2026, 3, 2), OpenFinanceTransactionMapper.EventDate(Card1234, line, other));
+        Assert.Null(OpenFinanceTransactionMapper.BillDate(Card1234, line, other));
     }
 
     [Theory]

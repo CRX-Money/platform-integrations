@@ -135,8 +135,8 @@ public sealed record OpenFinanceTransaction(
 {
     /// <summary>
     /// The booking date in Brazil's calendar: the date of <see cref="TransactionTime"/>. The read window, the
-    /// checkpoint and pairing go by it; an installment's import event may be dated later
-    /// (<see cref="OpenFinanceTransactionMapper.EventDate"/>).
+    /// checkpoint and pairing go by it; a card installment is also sent when its bill's date is in the window
+    /// (<see cref="OpenFinanceTransactionMapper.BillDate"/>).
     /// </summary>
     public DateOnly BookingDate => BrazilBankingCalendar.DateOf(TransactionTime);
 
@@ -155,6 +155,14 @@ public sealed record OpenFinanceTransaction(
     /// revised later does not change the key.
     /// </summary>
     public OpenFinanceForeignAmount? Foreign { get; init; }
+
+    /// <summary>
+    /// When the source last stored or changed the line, as it reports it (Pluggy: the later of <c>createdAt</c> and
+    /// <c>updatedAt</c>); null when it does not say. A line the issuer posts long after its transaction date, such as a
+    /// card purchase that stays pending until its bill closes, keeps its date but changes here when it posts, so the
+    /// shared plugin also sends a posted line changed since the window's first day (#1475). Never part of the key.
+    /// </summary>
+    public DateTimeOffset? SourceUpdatedAt { get; init; }
 }
 
 /// <summary>The original currency and amount of a line made in a currency other than the account's (#1440).</summary>
@@ -269,7 +277,8 @@ public sealed record OpenFinanceLineLinks
 
     /// <summary>
     /// On a card line: the bill the line names (<see cref="OpenFinanceTransaction.CardBillId"/>), when the read listed
-    /// it. It may date an installment (<see cref="OpenFinanceTransactionMapper.EventDate"/>) and adds no provider data.
+    /// it. It gives an installment its bill date (<see cref="OpenFinanceTransactionMapper.BillDate"/>), which sends the
+    /// line on a windowed read and is reported as <c>card.installment.billDate</c>; it never dates the event (#1476).
     /// </summary>
     public OpenFinanceCardBill? Bill { get; init; }
 }

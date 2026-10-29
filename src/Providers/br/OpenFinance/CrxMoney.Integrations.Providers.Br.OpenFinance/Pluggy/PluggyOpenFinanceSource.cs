@@ -158,10 +158,10 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
         var holder = HolderOf(bankAccounts);
 
         DateOnly? dateFrom = readFrom?.AddDays(-DateFromMarginDays);
-        // A card's balance includes its pending purchases, which can be as old as the open bill: read them all.
-        DateOnly? cardDateFrom = dateFrom is { } windowFrom
-            ? Min(windowFrom, BrazilBankingCalendar.DateOf(timeProvider.GetUtcNow()).AddDays(-CardPendingLookbackDays))
-            : null;
+        // A card's balance includes its pending purchases, which can be as old as the open bill: read them all. Anchored
+        // on the window, not on today (#1475): a purchase pending at the last success and posted since, read again after a
+        // long pause (a consent lapse, an idle item), is still in the read.
+        DateOnly? cardDateFrom = dateFrom is { } windowFrom ? windowFrom.AddDays(-CardPendingLookbackDays) : null;
         // The same window by when Pluggy stored the line, for the card lines the date window misses (#1426).
         DateTimeOffset? cardCreatedAtFrom = cardDateFrom is { } createdFrom
             ? new DateTimeOffset(createdFrom.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)
@@ -239,15 +239,14 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
     }
 
     /// <summary>
-    /// Days of card lines read before today on a windowed sync, so every pending purchase of the open bill is seen.
-    /// Pluggy marks a card purchase pending until a bill closes on it; two cycles leave room for a late closing.
+    /// Days of card lines read before the window's first day on a windowed sync, so every pending purchase of the open bill
+    /// is seen, and every purchase that was pending at the last success and posted since (#1475). Pluggy marks a card
+    /// purchase pending until a bill closes on it; two cycles leave room for a late closing.
     /// </summary>
     internal const int CardPendingLookbackDays = 62;
 
     /// <summary>The identity basis of a position known only by Pluggy's id.</summary>
     internal const string SourceIdBasis = "pluggy";
-
-    private static DateOnly Min(DateOnly a, DateOnly b) => a < b ? a : b;
 
     /// <summary>
     /// The lines of the date read followed by those of the <c>createdAtFrom</c> read it does not hold, by Pluggy's line
@@ -683,8 +682,17 @@ internal sealed class PluggyOpenFinanceSource(PluggyApiClient api, TimeProvider 
         {
             CardDetails = isCard ? NormalizeCardDetails(transaction.CreditCardMetadata) : null,
             Foreign = foreign,
+            SourceUpdatedAt = Latest(transaction.CreatedAt, transaction.UpdatedAt),
         };
     }
+
+    /// <summary>
+    /// The later of Pluggy's <c>createdAt</c> and <c>updatedAt</c> (#1475). A card purchase stays PENDING until its bill
+    /// closes and then turns POSTED under the same id, keeping its <c>date</c> and <c>createdAt</c>; its <c>updatedAt</c>
+    /// moves to the closing. Pluggy documents no <c>updatedAtFrom</c> filter, so the line is found in the date read.
+    /// </summary>
+    private static DateTimeOffset? Latest(DateTimeOffset? createdAt, DateTimeOffset? updatedAt) =>
+        createdAt is { } created && updatedAt is { } updated ? (created > updated ? created : updated) : createdAt ?? updatedAt;
 
     /// <summary>
     /// The line's amount in the account's currency and, on a line made in another currency, its original amount (#1440).

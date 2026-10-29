@@ -277,11 +277,11 @@ public sealed class PluggyInvestmentAndCardTests
         var server = FakePluggyServer.WithFixtures();
         using var host = new PluggyTestHost(server, new FakeTimeProvider(new DateTimeOffset(2026, 11, 12, 12, 0, 0, TimeSpan.Zero)));
 
-        // Window start 10 Nov → bank read from 2 Nov; the card from 62 days before 12 Nov, which holds the pending d03 (13 Oct).
+        // Window start 10 Nov → bank read from 2 Nov; the card from 62 days before that (#1475), which holds the pending d03 (13 Oct).
         var result = await host.Plugin.SyncAsync(PluggyTestHost.Request(windowStart: new DateTimeOffset(2026, 11, 10, 12, 0, 0, TimeSpan.Zero)), Ct);
 
         Assert.Equal("2026-11-02", server.TransactionRequests(FakePluggyServer.BankAccountId).Single().Query("dateFrom"));
-        Assert.Equal("2026-09-11", server.TransactionRequests(FakePluggyServer.CardAccountId).Single(r => r.Query("createdAtFrom") is null).Query("dateFrom"));
+        Assert.Equal("2026-09-01", server.TransactionRequests(FakePluggyServer.CardAccountId).Single(r => r.Query("createdAtFrom") is null).Query("dateFrom"));
         var card = Row(result, CardAccountKey);
         Assert.Equal(0, card["sent"]!.GetValue<int>());
         Assert.Equal(42m, card["pendingAmount"]!.GetValue<decimal>());
