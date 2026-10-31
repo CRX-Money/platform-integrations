@@ -21,7 +21,11 @@
   <ItemGroup Label="Tools">
     <!-- tools/InstitutionMarks renders the institution marks to find their content bounds and to draw the contact sheet. -->
     <PackageVersion Include="Svg.Skia" Version="5.2.3" />
-    <!-- The renderer's native library for Linux (CI); Windows and macOS get theirs with SkiaSharp. Same version as the SkiaSharp that Svg.Skia brings. -->
+    <!-- SkiaSharp is pinned explicitly so that it and the Linux native library (CI; Windows and macOS get theirs with
+         SkiaSharp itself) always move together: Svg.Skia only sets a floor, and a native library newer than the managed
+         binding fails at start-up on Linux ("The version of the native libSkiaSharp library ... is incompatible").
+         SkiaSharpVersionsTests fails when the two versions differ; Dependabot bumps both in the same group PR. -->
+    <PackageVersion Include="SkiaSharp" Version="4.148.0" />
     <PackageVersion Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.148.0" />
   </ItemGroup>
 
