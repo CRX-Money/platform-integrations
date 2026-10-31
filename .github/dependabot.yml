@@ -4,6 +4,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # SkiaSharp.NativeAssets.Linux.NoDependencies must stay at the SkiaSharp version Svg.Skia brings (see
+    # Directory.Packages.props): a bump on its own breaks every renderer test on Linux with "The version of the
+    # native libSkiaSharp library (...) is incompatible with this version of SkiaSharp" (PR #22). It moves with Svg.Skia.
+    ignore:
+      - dependency-name: SkiaSharp.NativeAssets.Linux.NoDependencies
     groups:
       nuget:
         patterns: ['*']
