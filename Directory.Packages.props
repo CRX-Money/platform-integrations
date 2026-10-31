@@ -15,7 +15,7 @@
       DependencyInjection, Logging and Options abstractions the providers use.
     -->
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.11.0" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup Label="Tools">
@@ -26,7 +26,7 @@
          binding fails at start-up on Linux ("The version of the native libSkiaSharp library ... is incompatible").
          SkiaSharpVersionsTests fails when the two versions differ; Dependabot bumps both in the same group PR. -->
     <PackageVersion Include="SkiaSharp" Version="4.148.0" />
-    <PackageVersion Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.148.0" />
+    <PackageVersion Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.154.0" />
   </ItemGroup>
 
   <ItemGroup Label="Tests">
