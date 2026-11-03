@@ -200,7 +200,7 @@ has exactly one adapter, that adapter runs.
   received those lines; only a full-history sync did (the known gap #1424 left). On a
   windowed sync the Pluggy adapter now reads each credit card twice: by `dateFrom` as
   before, and by `createdAtFrom` (when Pluggy stored the line) from the same date, the
-  card's read date (`cardTransactionsDateFrom`, at least 62 days before today; since preview.12, 62 days before the window), at
+  card's read date (`cardTransactionsDateFrom`, at least 62 days before today; since preview.13, 62 days before the window), at
   00:00:00.000Z. Pluggy takes no `dateFrom` together with `createdAtFrom`
   ([reference](https://docs.pluggy.ai/reference/transactions-list-by-cursor)), so it is
   a read of its own, paged by its own cursor. The lines only the second read returns
