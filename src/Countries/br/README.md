@@ -15,7 +15,7 @@ dotnet add package CrxMoney.Integrations.Countries.Br --prerelease
 | `BrazilianTaxId` | Parses a formatted or bare CPF/CNPJ (including the 2026 alphanumeric CNPJ) and accepts it only with valid check digits, so masked values never become identifiers. |
 | `BrazilianBankAccount` | A deposit account as the banks identify it: COMPE + branch + account with check digit. `ExternalAccountId` is `br:{compe}:{branch}:{number}`; cards are `br:{compe}:card:{last4}`; investment positions are `br:{compe}:inv:{basis}:{key}`. |
 | `BrazilBankingCalendar` | São Paulo booking dates; `StartOfDay` gives midnight of a booking date (`2026-03-10T00:00-03:00`), at which deposit lines are imported, and `TimeZone` the zone a card line's instant is expressed in. |
-| `BrazilianInstitutions` | The account operators: COMPE code to display name and official website (below). |
+| `BrazilianInstitutions` | The account operators: COMPE code to display name, official website and the currencies each offers accounts in (below). |
 | `BrazilianInstitutionMarks` | The marks (logos) that identify those institutions in a connect list: `TryOpen(key, out stream, out mediaType)`; `BrazilianInstitution.MarkResourceName` names the embedded resource (below). `TryOpenConnector(connectorId, ...)` opens a business connector's own mark. |
 | `BrazilianInstitutionConnectors` | The aggregator's connectors per institution: the main one (its icon is the institution's mark) and the business (PJ) variant (Inter Empresas next to Inter): `Find(connectorId)`, `For(compeOrIspb, isBusiness)`. |
 
@@ -29,8 +29,8 @@ it is the rules of one provider, not of the country.
 
 `Data/br-institutions.json` ships inside the package as an embedded
 resource and is read through `BrazilianInstitutions.Find(compe)` /
-`WebsiteOf(compe)` (namespace `CrxMoney.Integrations.Countries.Br`). Each entry holds `compe`, `ispb`, `name` (display name),
-`legalName` and `website` (a canonical `https://host/` URL). COMPE codes, ISPB
+`WebsiteOf(compe)` / `CurrenciesOf(compe)` (namespace `CrxMoney.Integrations.Countries.Br`). Each entry holds `compe`, `ispb`, `name` (display name),
+`legalName`, `website` (a canonical `https://host/` URL) and `currencies` (below). COMPE codes, ISPB
 and legal names come from the Banco Central do Brasil's list of STR participants,
 [ParticipantesSTR.csv](https://www.bcb.gov.br/content/estabilidadefinanceira/str1/ParticipantesSTR.csv)
 (retrieved 2026-10-19 for the first 28 entries and again on 2026-10-20, when the
@@ -135,6 +135,37 @@ Notes:
 - To add an entry, take the code, ISPB and legal name from the Banco Central file,
   open the institution's own site, and keep the list sorted by code. A test checks
   every entry's format.
+
+## Account currencies
+
+Each entry's `currencies` lists the ISO 4217 codes of the currencies the institution offers accounts in, the home
+currency first (`BrazilianInstitutions.HomeCurrency`, `BRL`), then the others in the order the institution presents
+them. `BrazilianInstitution.Currencies` exposes the list, and `CurrenciesOf(compe)` returns `BRL` alone for a code the
+list does not have. A host's currency picker offers these first and keeps every other ISO currency one step away, so a
+missing currency costs one more click while a wrong one would mislead: a currency is declared only when the
+institution's own pages (or content it publishes under its name) say its customers can hold an account in it, and
+otherwise the entry lists `BRL` only. Tests check that every code is a known ISO 4217 code, that `BRL` comes first, that
+nothing repeats, and that the institutions with more than one currency are exactly the ones in this table.
+
+| COMPE | Institution | Currencies | Product | Source (checked 2026-11-04) |
+| --- | --- | --- | --- | --- |
+| 033 | Santander | BRL USD | Select Global, a dollar account with a debit card | Santander's blog and FAQ on santander.com.br ("Select Global: como comprar dólar com sua conta Santander?", `/conta-internacional-faq`) |
+| 077 | Inter | BRL USD EUR | Global Account, balances in dollars or euros | Inter's blog, blog.inter.co ("Como receber em dólar no Inter: entendendo a Global Account") |
+| 208 | BTG Pactual | BRL USD | Contas Internacionais, a dollar current account | BTG Pactual's brand content on Money Times and Seu Dinheiro (2025); btgpactual.com could not be read by the checker |
+| 237 | Bradesco | BRL USD | My Account, an international account priced on the commercial dollar | Bradesco's exchange page on banco.bradesco (`/html/classic/produtos-servicos/cambio/`) |
+| 336 | C6 Bank | BRL USD EUR | C6 Conta Global in dollars and in euros | C6 Bank's blog on c6bank.com.br ("Posso ter uma Conta Global Dólar e uma Conta Global Euro?") |
+| 341 | Itaú | BRL USD EUR | Conta Global (Personnalité, Uniclass), balances in dollars and euros | Itaú's investor-relations news and `/uniclass/conta-global` on itau.com.br |
+
+Left at `BRL` on purpose, until a source of the institution's own confirms more:
+
+- Nubank (260): its global account (2024) is a Wise partnership for one high-income segment, and no page of Nubank's
+  confirms it today; its US dollar account is a US product, not an account of Nu Pagamentos' customers in Brazil.
+- XP Investimentos (102): the Conta Global (dollar, euro, pound) is offered by Banco XP (348, not listed) through
+  Wise, and only third-party coverage describes its currencies.
+- Banco do Brasil (001): its dollar and euro accounts are held by its banks abroad (BB Americas, BB Portugal), and only
+  third-party coverage was found.
+- Brokers in the list (Toro, Ágora) and the payment institutions quote in BRL. The list has no crypto exchange; one
+  added later lists its quote currencies.
 
 ## Institution marks
 
