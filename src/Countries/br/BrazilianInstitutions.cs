@@ -17,11 +17,20 @@ public sealed record BrazilianInstitution(string Compe, string Ispb, string Name
     /// monogram. Open it with <see cref="BrazilianInstitutionMarks.TryOpen"/>.
     /// </summary>
     public string? MarkResourceName => BrazilianInstitutionMarks.ResourceNameOf(Ispb);
+
+    /// <summary>
+    /// The ISO 4217 codes of the currencies this institution offers accounts in, the home currency
+    /// (<see cref="BrazilianInstitutions.HomeCurrency"/>) first, then the others in the order the institution presents them
+    /// (<c>BRL USD EUR</c> for a bank with a global account in dollars and euros). A host offers these first in a currency
+    /// picker, with every other ISO currency one step away. Most institutions list the home currency only; the package
+    /// README says where each longer list comes from.
+    /// </summary>
+    public IReadOnlyList<string> Currencies { get; init; } = [BrazilianInstitutions.HomeCurrency];
 }
 
 /// <summary>
 /// The institutions of <c>Data/br-institutions.json</c>, shipped inside this package: a COMPE code's
-/// display name and official website: the account operators. It is local data of the Brazilian country package, so bank
+/// display name, official website and account currencies: the account operators. It is local data of the Brazilian country package, so bank
 /// codes stay out of the platform's own database; the host only sees the website, which it can match to an account operator.
 /// Codes come from the Banco Central's list of STR participants; the file says where and when.
 /// </summary>
@@ -29,6 +38,9 @@ public static class BrazilianInstitutions
 {
     /// <summary>The embedded resource holding the list.</summary>
     public const string ResourceName = "CrxMoney.Integrations.Countries.Br.br-institutions.json";
+
+    /// <summary>The country's home currency (ISO 4217), first in every institution's <see cref="BrazilianInstitution.Currencies"/>.</summary>
+    public const string HomeCurrency = "BRL";
 
     private static readonly Lazy<FrozenDictionary<string, BrazilianInstitution>> ByCompe = new(() => Parse(ReadResource()));
 
@@ -53,6 +65,12 @@ public static class BrazilianInstitutions
     /// <summary>The official website of the institution with COMPE code <paramref name="compe"/>, when known.</summary>
     public static string? WebsiteOf(string? compe) => Find(compe)?.Website.AbsoluteUri;
 
+    /// <summary>
+    /// The currencies the institution with COMPE code <paramref name="compe"/> offers accounts in, home currency first; an
+    /// institution the list does not have offers the home currency only.
+    /// </summary>
+    public static IReadOnlyList<string> CurrenciesOf(string? compe) => Find(compe)?.Currencies ?? [HomeCurrency];
+
     /// <summary>Reads the embedded list as JSON text.</summary>
     internal static string ReadResource()
     {
@@ -64,7 +82,8 @@ public static class BrazilianInstitutions
 
     /// <summary>
     /// Parses and checks a list: COMPE three digits, ISPB eight digits, both unique, a name and a legal name, and a
-    /// website that is an absolute <c>https</c> URL of a host only (<c>https://inter.co/</c>).
+    /// website that is an absolute <c>https</c> URL of a host only (<c>https://inter.co/</c>), and currencies that are
+    /// three upper-case letters each, start with <see cref="HomeCurrency"/> and do not repeat.
     /// </summary>
     /// <exception cref="FormatException">An entry breaks one of those rules; the message names it.</exception>
     internal static FrozenDictionary<string, BrazilianInstitution> Parse(string json)
@@ -102,7 +121,18 @@ public static class BrazilianInstitutions
                 throw new FormatException($"Institution {label}: the website must be a canonical https://host/ URL.");
             }
 
-            if (!result.TryAdd(compe, new BrazilianInstitution(compe, ispb, entry.Name.Trim(), entry.LegalName.Trim(), website)))
+            if (entry.Currencies is not { Count: > 0 } currencies || currencies[0] != HomeCurrency)
+                throw new FormatException($"Institution {label}: the currencies must start with the home currency, {HomeCurrency}.");
+            if (!currencies.All(c => c is { Length: 3 } && c.All(char.IsAsciiLetterUpper)))
+                throw new FormatException($"Institution {label}: every currency must be a three-letter upper-case ISO 4217 code.");
+            if (currencies.Distinct(StringComparer.Ordinal).Count() != currencies.Count)
+                throw new FormatException($"Institution {label}: a currency appears twice.");
+
+            var institution = new BrazilianInstitution(compe, ispb, entry.Name.Trim(), entry.LegalName.Trim(), website)
+            {
+                Currencies = [.. currencies],
+            };
+            if (!result.TryAdd(compe, institution))
                 throw new FormatException($"Institution {label}: the COMPE code appears twice.");
             if (!ispbs.Add(ispb))
                 throw new FormatException($"Institution {label}: the ISPB appears twice.");
@@ -121,7 +151,8 @@ public static class BrazilianInstitutions
         [property: JsonPropertyName("ispb")] string? Ispb,
         [property: JsonPropertyName("name")] string? Name,
         [property: JsonPropertyName("legalName")] string? LegalName,
-        [property: JsonPropertyName("website")] string? Website);
+        [property: JsonPropertyName("website")] string? Website,
+        [property: JsonPropertyName("currencies")] IReadOnlyList<string>? Currencies);
 }
 
 [JsonSerializable(typeof(BrazilianInstitutions.InstitutionList))]

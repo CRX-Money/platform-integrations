@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Nodes;
 
 namespace CrxMoney.Integrations.Countries.Br.Tests;
@@ -28,7 +29,7 @@ public sealed class BrazilianInstitutionsTests
         Assert.All(entries.GroupBy(e => e["website"]!.GetValue<string>()), g => Assert.Single(g.Select(e => e["name"]!.GetValue<string>()).Distinct()));
         Assert.All(entries, e =>
         {
-            Assert.Equal(["compe", "ispb", "name", "legalName", "website"], e.AsObject().Select(p => p.Key));
+            Assert.Equal(["compe", "ispb", "name", "legalName", "website", "currencies"], e.AsObject().Select(p => p.Key));
             Assert.Matches("^[0-9]{3}$", e["compe"]!.GetValue<string>());
             Assert.Matches("^[0-9]{8}$", e["ispb"]!.GetValue<string>());
             Assert.False(string.IsNullOrWhiteSpace(e["name"]!.GetValue<string>()));
@@ -133,14 +134,20 @@ public sealed class BrazilianInstitutionsTests
     }
 
     [Theory]
-    [InlineData("""{"institutions":[{"compe":"77","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://a.example/"}]}""", "COMPE")]
-    [InlineData("""{"institutions":[{"compe":"077","ispb":"1","name":"A","legalName":"A S.A.","website":"https://a.example/"}]}""", "ISPB")]
-    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":" ","legalName":"A S.A.","website":"https://a.example/"}]}""", "name")]
-    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"http://a.example/"}]}""", "website")]
-    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://a.example/conta"}]}""", "website")]
-    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://A.example"}]}""", "website")]
-    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://a.example/"},{"compe":"077","ispb":"00000002","name":"B","legalName":"B S.A.","website":"https://b.example/"}]}""", "twice")]
-    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://a.example/"},{"compe":"078","ispb":"00000001","name":"B","legalName":"B S.A.","website":"https://b.example/"}]}""", "twice")]
+    [InlineData("""{"institutions":[{"compe":"77","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://a.example/","currencies":["BRL"]}]}""", "COMPE")]
+    [InlineData("""{"institutions":[{"compe":"077","ispb":"1","name":"A","legalName":"A S.A.","website":"https://a.example/","currencies":["BRL"]}]}""", "ISPB")]
+    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":" ","legalName":"A S.A.","website":"https://a.example/","currencies":["BRL"]}]}""", "name")]
+    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"http://a.example/","currencies":["BRL"]}]}""", "website")]
+    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://a.example/conta","currencies":["BRL"]}]}""", "website")]
+    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://A.example","currencies":["BRL"]}]}""", "website")]
+    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://a.example/","currencies":["BRL"]},{"compe":"077","ispb":"00000002","name":"B","legalName":"B S.A.","website":"https://b.example/","currencies":["BRL"]}]}""", "twice")]
+    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://a.example/","currencies":["BRL"]},{"compe":"078","ispb":"00000001","name":"B","legalName":"B S.A.","website":"https://b.example/","currencies":["BRL"]}]}""", "twice")]
+    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://a.example/"}]}""", "home currency")]
+    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://a.example/","currencies":[]}]}""", "home currency")]
+    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://a.example/","currencies":["USD","BRL"]}]}""", "home currency")]
+    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://a.example/","currencies":["BRL","usd"]}]}""", "three-letter")]
+    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://a.example/","currencies":["BRL","US"]}]}""", "three-letter")]
+    [InlineData("""{"institutions":[{"compe":"077","ispb":"00000001","name":"A","legalName":"A S.A.","website":"https://a.example/","currencies":["BRL","USD","USD"]}]}""", "appears twice")]
     [InlineData("""{"institutions":[]}""", "no institutions")]
     [InlineData("""not json""", "JSON")]
     public void A_malformed_list_is_rejected_with_the_rule_it_breaks(string json, string expected)
@@ -148,5 +155,86 @@ public sealed class BrazilianInstitutionsTests
         var failure = Assert.Throws<FormatException>(() => BrazilianInstitutions.Parse(json));
 
         Assert.Contains(expected, failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Every ISO 4217 currency of a country or region .NET knows (ICU's region data): a declared code must be one of them,
+    /// so a typo or an invented code never reaches a host's currency picker.
+    /// </summary>
+    private static readonly HashSet<string> KnownIsoCurrencies = CultureInfo.GetCultures(CultureTypes.SpecificCultures)
+        .Select(c =>
+        {
+            try { return new RegionInfo(c.Name).ISOCurrencySymbol; }
+            catch (ArgumentException) { return null; }
+        })
+        .OfType<string>()
+        .Where(code => code.Length == 3)
+        .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The institutions that offer accounts in more than the home currency, each researched on the institution's own pages
+    /// (the README's "Account currencies" table gives the source). Any other institution lists BRL only; adding one here
+    /// needs a source in that table.
+    /// </summary>
+    private static readonly Dictionary<string, string[]> ResearchedMultiCurrency = new(StringComparer.Ordinal)
+    {
+        ["033"] = ["BRL", "USD"],        // Santander: Select Global.
+        ["077"] = ["BRL", "USD", "EUR"], // Inter: Global Account.
+        ["208"] = ["BRL", "USD"],        // BTG Pactual: Contas Internacionais.
+        ["237"] = ["BRL", "USD"],        // Bradesco: My Account.
+        ["336"] = ["BRL", "USD", "EUR"], // C6 Bank: C6 Conta Global.
+        ["341"] = ["BRL", "USD", "EUR"], // Itaú: Conta Global.
+    };
+
+    [Fact]
+    public void Every_declared_currency_is_a_known_iso_4217_code()
+    {
+        Assert.Contains("BRL", KnownIsoCurrencies);
+        Assert.Contains("EUR", KnownIsoCurrencies);
+        Assert.All(BrazilianInstitutions.All, institution =>
+            Assert.All(institution.Currencies, code => Assert.Contains(code, KnownIsoCurrencies)));
+    }
+
+    [Fact]
+    public void The_home_currency_comes_first_and_no_currency_repeats()
+    {
+        Assert.Equal("BRL", BrazilianInstitutions.HomeCurrency);
+        Assert.All(BrazilianInstitutions.All, institution =>
+        {
+            Assert.NotEmpty(institution.Currencies);
+            Assert.Equal(BrazilianInstitutions.HomeCurrency, institution.Currencies[0]);
+            Assert.Equal(institution.Currencies.Count, institution.Currencies.Distinct(StringComparer.Ordinal).Count());
+        });
+    }
+
+    [Fact]
+    public void Only_the_researched_institutions_offer_more_than_the_home_currency()
+    {
+        var multi = BrazilianInstitutions.All
+            .Where(i => i.Currencies.Count > 1)
+            .ToDictionary(i => i.Compe, i => i.Currencies.ToArray(), StringComparer.Ordinal);
+
+        Assert.Equal(ResearchedMultiCurrency.Keys.Order(StringComparer.Ordinal), multi.Keys.Order(StringComparer.Ordinal));
+        Assert.All(ResearchedMultiCurrency, pair => Assert.Equal(pair.Value, multi[pair.Key]));
+    }
+
+    [Theory]
+    [InlineData("077", "BRL USD EUR")]
+    [InlineData("208", "BRL USD")]
+    [InlineData("001", "BRL")]
+    [InlineData("260", "BRL")]
+    [InlineData("999", "BRL")]
+    [InlineData(null, "BRL")]
+    public void A_code_gives_its_account_currencies_and_an_unknown_one_the_home_currency(string? compe, string expected)
+    {
+        Assert.Equal(expected, string.Join(' ', BrazilianInstitutions.CurrenciesOf(compe)));
+    }
+
+    [Fact]
+    public void An_institution_built_without_currencies_offers_the_home_currency()
+    {
+        var institution = new BrazilianInstitution("999", "99999999", "Example", "Example S.A.", new Uri("https://example.com/"));
+
+        Assert.Equal([BrazilianInstitutions.HomeCurrency], institution.Currencies);
     }
 }
