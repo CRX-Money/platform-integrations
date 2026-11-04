@@ -226,7 +226,7 @@ public sealed class PluggyIntegrationPluginTests
         var pixIn = events["00000000-0000-4000-8000-000000000c01"];
         Assert.Equal("deposit", pixIn.Type);
         Assert.Equal(1500m, pixIn.Amount);
-        Assert.Equal(new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.FromHours(-3)), pixIn.OccurredAtUtc);
+        Assert.Equal(new DateTimeOffset(2026, 9, 1, 9, 15, 30, TimeSpan.FromHours(-3)), pixIn.OccurredAtUtc); // its time, on its day (#1477)
         Assert.Equal(SyntheticTaxIds.Cnpj(1), Data(pixIn)["counterparty"]!["taxId"]!.GetValue<string>());
         Assert.Equal("00000001", Data(pixIn)["counterparty"]!["ispb"]!.GetValue<string>());
         Assert.Equal("Pluggy", Data(pixIn)["provider"]!.GetValue<string>());

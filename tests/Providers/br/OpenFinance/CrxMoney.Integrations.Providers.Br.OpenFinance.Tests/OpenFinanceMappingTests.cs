@@ -41,7 +41,8 @@ public sealed class OpenFinanceMappingTests
         Assert.StartsWith("brof:", importEvent.IdempotencyKey, StringComparison.Ordinal);
         Assert.Equal("deposit", importEvent.Type);
         Assert.Equal("br:077:0001:123456789", importEvent.ExternalAccountId);
-        Assert.Equal(new DateTimeOffset(2026, 9, 10, 0, 0, 0, TimeSpan.FromHours(-3)), importEvent.OccurredAtUtc);
+        // The line carries a time on its booking date: the event is at it, in Brazil (#1477).
+        Assert.Equal(new DateTimeOffset(2026, 9, 10, 12, 0, 5, TimeSpan.FromHours(-3)), importEvent.OccurredAtUtc);
         Assert.Equal("BRL", importEvent.AssetCode);
         Assert.Equal(1500m, importEvent.Amount);
         Assert.Equal(OpenFinanceImportSchemas.DepositSchemaId, importEvent.ProviderDataSchemaId);

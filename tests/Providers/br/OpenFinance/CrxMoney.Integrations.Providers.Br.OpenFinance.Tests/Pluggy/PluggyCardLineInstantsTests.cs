@@ -61,7 +61,7 @@ public sealed class PluggyCardLineInstantsTests
         Diagnostics(result)["accounts"]!.AsArray().Single(a => a!["externalAccountId"]!.GetValue<string>() == CardAccountKey)!;
 
     [Fact]
-    public async Task A_card_line_is_dated_at_the_issuers_instant_with_brazils_offset_and_a_deposit_line_at_midnight()
+    public async Task A_card_line_is_dated_at_the_issuers_instant_with_brazils_offset()
     {
         var result = await SyncAsync(new JsonArray(Purchase("POSTED", "2026-09-22T16:21:37.586Z")), windowStart: null);
 
@@ -71,10 +71,10 @@ public sealed class PluggyCardLineInstantsTests
         // The key is the one of before #1476: the instant to the second, never the event's date.
         Assert.Equal(OpenFinanceTransactionMapper.IdempotencyKey($"{CardAccountKey}|2026-09-20T18:42:10Z|D|41.37", 0), card.IdempotencyKey);
 
-        // Deposit lines are out of #1476: still at midnight in Brazil of their booking date.
+        // Deposit lines follow their own rule (#1477, PluggyDepositLineInstantsTests): on their booking date, in Brazil.
         var deposits = result.ImportEvents.Where(e => e.ExternalAccountId.StartsWith("br:077:0", StringComparison.Ordinal)).ToList();
         Assert.NotEmpty(deposits);
-        Assert.All(deposits, e => Assert.Equal(TimeSpan.Zero, e.OccurredAtUtc.TimeOfDay));
+        Assert.All(deposits, e => Assert.Equal(TimeSpan.FromHours(-3), e.OccurredAtUtc.Offset));
     }
 
     [Fact]

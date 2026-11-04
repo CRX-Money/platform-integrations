@@ -45,10 +45,29 @@ public sealed partial class PluggyRenameAndSettingsTests
             Assert.Equal(expected["idempotencyKey"]!.GetValue<string>(), e.IdempotencyKey);
             Assert.Equal(expected["type"]!.GetValue<string>(), e.Type);
             Assert.Equal(expected["amount"]!.GetValue<decimal>(), e.Amount);
-            Assert.Equal(expected["occurredAtUtc"]!.GetValue<string>(), e.OccurredAtUtc.ToString("O", CultureInfo.InvariantCulture));
+            AssertSameDate(expected["occurredAtUtc"]!.GetValue<string>(), e);
             Assert.Equal(expected["schemaId"]!.GetValue<string>(), e.ProviderDataSchemaId);
             Assert.Equal(expected["providerDataSha256"]!.GetValue<string>(), Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(WithoutLaterCardKeys(e.ProviderData!)))));
         }
+    }
+
+    /// <summary>
+    /// The golden date, except for a deposit account's line (money in or out) that carries a time on its booking date: since #1477 its event is at that
+    /// time (its provider data's <c>transactionTime</c>), on the same day, where the golden file has midnight.
+    /// </summary>
+    private static void AssertSameDate(string golden, IntegrationImportEvent e)
+    {
+        var actual = e.OccurredAtUtc.ToString("O", CultureInfo.InvariantCulture);
+        if (actual == golden)
+            return;
+
+        var expected = DateTimeOffset.Parse(golden, CultureInfo.InvariantCulture);
+        Assert.DoesNotContain(":card:", e.ExternalAccountId, StringComparison.Ordinal); // a deposit account's line, money in or out
+        Assert.Equal(TimeSpan.Zero, expected.TimeOfDay);
+        Assert.Equal(expected.Date, e.OccurredAtUtc.Date);
+        Assert.Equal(expected.Offset, e.OccurredAtUtc.Offset);
+        var transactionTime = JsonNode.Parse(e.ProviderData!)!["transactionTime"]!.GetValue<DateTimeOffset>();
+        Assert.Equal(transactionTime, e.OccurredAtUtc);
     }
 
     /// <summary>
