@@ -12,8 +12,9 @@ namespace CrxMoney.Integrations.Providers.Br.OpenFinance;
 /// <summary>
 /// Maps <see cref="OpenFinanceTransaction"/>s to <see cref="IntegrationImportEvent"/>s the same way for
 /// every aggregator: BRL <c>deposit</c>/<c>withdrawal</c>, positive amount, the bank's own account
-/// identity as external account, a card line at the issuer's instant and a deposit line at midnight in Brazil of its
-/// booking date (see <see cref="EventTime"/>), and an idempotency key built only from what the bank reports, so the same
+/// identity as external account, a card line at the issuer's instant and a deposit line at the issuer's time on its
+/// booking date when the source gives one, else at midnight in Brazil of it (see <see cref="EventTime"/>), and an
+/// idempotency key built only from what the bank reports, so the same
 /// line read through another aggregator gets the same key.
 /// </summary>
 public static partial class OpenFinanceTransactionMapper
@@ -110,12 +111,36 @@ public static partial class OpenFinanceTransactionMapper
     /// (<see cref="OpenFinanceTransaction.TransactionTime"/>: Pluggy's <c>creditCardMetadata.transactionDateTime</c>, else
     /// its <c>date</c>), with Brazil's offset (<c>2026-03-14T12:09:26-03:00</c>), never at a bill (#1476); the bill stays a
     /// fact of the line (<c>card.billId</c>, <c>card.billPostDate</c>, <c>card.installment.billDate</c>). A deposit line is
-    /// dated at midnight in Brazil of its booking date, as before. The idempotency key does not depend on it.
+    /// dated by <see cref="DepositEventTime"/> on its booking date (#1477): at the issuer's time when the source gives one
+    /// on that day, else at midnight in Brazil. The idempotency key does not depend on it.
     /// </summary>
     public static DateTimeOffset EventTime(OpenFinanceAccount account, OpenFinanceTransaction transaction) =>
         account.Kind == OpenFinanceAccountKind.CreditCard
             ? TimeZoneInfo.ConvertTime(transaction.TransactionTime, BrazilBankingCalendar.TimeZone)
-            : BrazilBankingCalendar.StartOfDay(transaction.BookingDate);
+            : DepositEventTime(transaction.BookingDate, transaction.TransactionTime);
+
+    /// <summary>
+    /// The instant of a deposit line's event (#1477). A statement's day is what a person reconciles against; a time is
+    /// extra, never a different day. So the event is at <paramref name="instant"/>, with Brazil's offset
+    /// (<c>2026-03-10T17:45:12Z</c> becomes <c>2026-03-10T14:45:12-03:00</c>), when the instant carries a time
+    /// (<see cref="CarriesTime"/>) <b>and</b> its calendar day in Brazil is <paramref name="statementDate"/>; otherwise at
+    /// midnight in Brazil of <paramref name="statementDate"/> (<c>2026-03-10T00:00-03:00</c>), as up to preview.13.
+    /// A live read passes the line's booking date; a host re-dating a stored line passes the day the line is stored on and
+    /// the instant its provider data holds (<c>transactionTime</c>), and gets the same answer the plugin gives today.
+    /// </summary>
+    public static DateTimeOffset DepositEventTime(DateOnly statementDate, DateTimeOffset instant) =>
+        CarriesTime(instant) && BrazilBankingCalendar.DateOf(instant) == statementDate
+            ? TimeZoneInfo.ConvertTime(instant, BrazilBankingCalendar.TimeZone)
+            : BrazilBankingCalendar.StartOfDay(statementDate);
+
+    /// <summary>
+    /// Whether a source instant carries a time of day rather than a plain calendar day. Aggregators write a plain day as
+    /// midnight in Brazil (Pluggy: <c>2026-03-10T03:00:00.000Z</c>) or, now and then, as midnight UTC
+    /// (<c>2026-03-10T00:00:00.000Z</c>, read the same way for a card's <c>purchaseDate</c>); neither is a time.
+    /// </summary>
+    public static bool CarriesTime(DateTimeOffset instant) =>
+        TimeZoneInfo.ConvertTime(instant, BrazilBankingCalendar.TimeZone).TimeOfDay != TimeSpan.Zero
+        && instant.UtcDateTime.TimeOfDay != TimeSpan.Zero;
 
     /// <summary>
     /// The Brazilian date of the line's import event (<see cref="EventTime"/>): its booking date, for every line since

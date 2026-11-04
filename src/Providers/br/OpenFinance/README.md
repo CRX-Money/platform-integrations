@@ -30,6 +30,36 @@ has exactly one adapter, that adapter runs.
 | --- | --- | --- | --- |
 | Pluggy | `Pluggy` (`PluggyAdapter.Name`) | `.AddPluggy()` | `Pluggy/`, namespace `CrxMoney.Integrations.Providers.Br.OpenFinance.Pluggy` |
 
+## Changes after 1.0.0-preview.13
+
+- **Deposit account lines keep the issuer's time when the source gives one (#1477).**
+  Up to preview.13 every line of a deposit (checking) account, money in or out, was
+  dated at midnight in Brazil of its booking date, and the issuer's instant stayed only
+  in the provider data (`transactionTime`, and Pluggy's raw `date` under
+  `sourcePayload`). A statement's day is what a person reconciles against; a time is
+  extra, never a different day. So now the event is at `transactionTime` itself, with
+  Brazil's offset (`2026-03-10T17:45:12Z` becomes `2026-03-10T14:45:12-03:00`), when
+  that instant carries a time **and** its calendar day in Brazil is the line's
+  statement date (its booking date); otherwise, as before, at midnight in Brazil of the
+  statement date (`2026-03-10T00:00-03:00`). An instant carries no time when it is
+  midnight in Brazil (Pluggy's plain day, `2026-03-10T03:00:00.000Z`, most deposit
+  lines) or midnight UTC (`2026-03-10T00:00:00.000Z`, read as a plain day as a card's
+  `purchaseDate` is). Card lines are unchanged (#1476).
+
+  **No key changes.** The line identity has always hashed the instant to the second,
+  never the event's date, so every line keeps its key and ordinal byte for byte. The
+  booking date, and so the read window, the checkpoint and pairing, is unchanged.
+
+  **Host.** Every deposit line with a time that the host already holds arrives under
+  its key with another time on the same day. The rule is published as
+  `OpenFinanceTransactionMapper.DepositEventTime(statementDate, instant)` (new; with
+  `CarriesTime(instant)`), and `EventTime` uses it for deposit lines: a host re-dating
+  its stored lines in place passes the day a line is stored on and the instant its
+  provider data holds (`transactionTime`, else `sourcePayload.date`) and gets the
+  instant a live read gives, or that day's midnight when the instant is another day or
+  has no time. CRX•Money's #1476 pass re-dates card lines only, reading the instant from
+  the provider data itself; it needs a host change to cover deposit lines.
+
 ## Changes after 1.0.0-preview.11
 
 - **Card lines are dated at the issuer's instant, installments included (#1476).**
@@ -564,8 +594,10 @@ aggregator API ──► IOpenFinanceSource (adapter, per aggregator)
   twice. The recipe is part of the package's released behaviour (`docs/versioning.md`).
 - **Dates**: a card line, an installment included, at the issuer's instant
   (`transactionTime`) with Brazil's offset, its bill a fact of the line
-  (`card.installment.billDate`; see the changes after preview.11); a deposit line at
-  midnight São Paulo of its booking date.
+  (`card.installment.billDate`; see the changes after preview.11); a deposit account's
+  line at the issuer's time when the source gives one on its booking date, else at
+  midnight São Paulo of its booking date (`DepositEventTime`, see the changes after
+  preview.13).
 - **Provider data** (schemas `br.openfinance.transaction.deposit`/`.withdrawal` v1):
   `provider` (the aggregator), `channel: "openfinance"`, type and detail,
   description, `counterparty` (name, `taxId` + `taxIdKind` + `taxIdCountry`,
@@ -934,7 +966,7 @@ counterparties, transfer hints, pending lines, the card balance split, card inst
 (`transactions-card-installments.json`), installment identities across reads of any subset and their windowed
 sending (#1424), the installment suffix after a location and trailing dates (#1430), the card read by creation date
 merged by line id with its own paging (#1426), lines in another currency on cards and deposit accounts, their keys and
-diagnostics (#1440), investment
+diagnostics (#1440), deposit account lines at the issuer's time on their statement day and at midnight otherwise (#1477), investment
 positions, movements and their page-number paging, sweep and bill-payment pairs,
 key stability and windowing, and failures, against an in-memory fake of the API
 (`/investments` and `/investments/{id}/transactions` as documented, with paging). The fixtures are **written from synthetic data** in the shape the
